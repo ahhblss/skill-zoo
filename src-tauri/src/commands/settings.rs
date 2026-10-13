@@ -1,5 +1,6 @@
 use crate::services::cli::CliService;
 use crate::services::lock::{SkillLock, SkillLockEntry};
+use crate::services::opener::open_directory;
 use crate::services::skill_usage::SkillUsage;
 use crate::services::tray::{
     validate_skill_companion_items, SkillCompanionItem, SKILL_COMPANION_ITEMS_SETTING,
@@ -9,7 +10,6 @@ use base64::Engine;
 use serde::Serialize;
 use std::collections::HashMap;
 use tauri::State;
-use tauri_plugin_opener::OpenerExt;
 
 type UpdateRepoKey = (String, String, Option<String>);
 type UpdateRepoEntries = Vec<(String, SkillLockEntry)>;
@@ -59,10 +59,7 @@ pub fn get_cache_size() -> Result<u64, String> {
 pub fn open_cache_dir(app_handle: tauri::AppHandle) -> Result<(), String> {
     let cache_dir = crate::config::get_repo_zip_cache_dir();
     std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
-    app_handle
-        .opener()
-        .open_path(cache_dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
+    open_directory(&app_handle, &cache_dir)
 }
 
 #[tauri::command]

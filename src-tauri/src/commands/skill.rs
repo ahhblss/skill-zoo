@@ -10,6 +10,7 @@ use crate::persistence::{
 use crate::services::cli::{CliService, KnownSkillUpdate};
 use crate::services::github;
 use crate::services::lock::{SkillLock, SUPPORTED_LOCK_VERSION};
+use crate::services::opener::open_directory;
 use crate::services::skill::{
     is_symlink_or_junction, DiscoverableSkill, InstalledSkill, ManagedSkill, RepoSkillsResult,
     SkillFileNode, SkillService, SymlinkStatus,
@@ -2265,10 +2266,7 @@ pub fn open_skill_dir(app_handle: tauri::AppHandle, directory: String) -> Result
     if !dir.exists() {
         return Err(format!("Directory does not exist: {}", dir.display()));
     }
-    app_handle
-        .opener()
-        .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
+    open_directory(&app_handle, &dir)
 }
 
 fn skill_file_error(code: &'static str, message: impl Into<String>) -> CommandError {
@@ -2392,6 +2390,9 @@ pub fn open_skill_path(
     let path = skill
         .existing_path(relative_path.as_deref().unwrap_or(""))
         .map_err(|e| e.to_string())?;
+    if path.is_dir() {
+        return open_directory(&app_handle, &path);
+    }
     app_handle
         .opener()
         .open_path(path.to_string_lossy(), None::<&str>)
@@ -2410,10 +2411,7 @@ pub fn open_skills_dir(app_handle: tauri::AppHandle, agent: String) -> Result<()
     if !dir.exists() {
         return Err(format!("Directory does not exist: {}", dir.display()));
     }
-    app_handle
-        .opener()
-        .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
+    open_directory(&app_handle, &dir)
 }
 
 // ────────────── Banners ──────────────
