@@ -36,41 +36,69 @@ impl AgentLease {
             .to_lowercase();
         let hash = Sha256::digest(identity.as_bytes());
         let port = 10240 + (u16::from_be_bytes([hash[0], hash[1]]) % 16384);
-        // SO_REUSEADDR keeps a fast release-and-reacquire (desktop restart, or
-        // the release test) immune to kernel linger state on the closed
-        // listener. A live listener elsewhere still fails the bind, so the
-        // cross-process exclusivity contract is unchanged.
-        #[cfg(unix)]
-        let listener = {
-            use socket2::{Domain, Protocol, Socket, Type};
-            let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
-                .map_err(|e| error::io(dir, e))?;
-            socket
-                .set_reuse_address(true)
-                .map_err(|e| error::io(dir, e))?;
-            socket
-                .bind(&std::net::SocketAddr::from((
-                    std::net::Ipv4Addr::LOCALHOST,
-                    port,
-                ))
-                .into())
-                .map_err(|_| {
-                    AppError::BadRequest("Another agent operation is running or the local lease is unavailable. Try again when it finishes.".into())
-                })?;
-            socket.listen(1).map_err(|e| error::io(dir, e))?;
-            std::net::TcpListener::from(socket)
-        };
-        #[cfg(not(unix))]
-        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
-            .map_err(|_| {
-                AppError::BadRequest("Another agent operation is running or the local lease is unavailable. Try again when it finishes.".into())
-            })?;
+        let listener = bind_lease_port(dir, port)?;
         let lease = Self {
             _listener: listener,
         };
         recover(dir)?;
         Ok(lease)
     }
+}
+
+// SO_REUSEADDR keeps a fast release-and-reacquire (desktop restart, or the
+// release test) immune to kernel linger state on the closed listener. A live
+// listener elsewhere still fails the bind, so the cross-process exclusivity
+// contract is unchanged.
+fn try_bind_lease_port(dir: &Path, port: u16) -> Result<std::net::TcpListener, AppError> {
+    #[cfg(unix)]
+    {
+        use socket2::{Domain, Protocol, Socket, Type};
+        let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
+            .map_err(|e| error::io(dir, e))?;
+        socket
+            .set_reuse_address(true)
+            .map_err(|e| error::io(dir, e))?;
+        socket
+            .bind(
+                &std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)).into(),
+            )
+            .map_err(|_| {
+                AppError::BadRequest("Another agent operation is running or the local lease is unavailable. Try again when it finishes.".into())
+            })?;
+        socket.listen(1).map_err(|e| error::io(dir, e))?;
+        Ok(std::net::TcpListener::from(socket))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+            .map_err(|_| {
+                AppError::BadRequest("Another agent operation is running or the local lease is unavailable. Try again when it finishes.".into())
+            })
+    }
+}
+
+// Tests run many leases concurrently against distinct homes whose identities
+// hash into one shared 16k port range, so two tests occasionally land on the
+// same port and the loser's bind fails while the winner's test is still
+// finishing. Retry briefly in test builds: a live holder releases within
+// milliseconds, while a real lease leak outlasts the window and still fails.
+// Production keeps the single attempt — a conflict there means another
+// process owns the lease and must be reported immediately.
+fn bind_lease_port(dir: &Path, port: u16) -> Result<std::net::TcpListener, AppError> {
+    let attempts = if cfg!(test) { 100 } else { 1 };
+    let mut conflict = None;
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        match try_bind_lease_port(dir, port) {
+            Ok(listener) => return Ok(listener),
+            Err(e @ AppError::BadRequest(_)) => conflict = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(conflict.expect("exhausted retries imply a recorded bind conflict"))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
