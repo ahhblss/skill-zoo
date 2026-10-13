@@ -122,7 +122,13 @@ describe("App local skill detail navigation", () => {
     renderApp();
 
     const user = userEvent.setup();
-    const firstSkillButton = await screen.findByRole("button", { name: "Skill 0" });
+    // The first list render waits on a chain of queries; under load jsdom can
+    // outlast findByRole's 1s default and strand the test on the skeletons.
+    const firstSkillButton = await screen.findByRole(
+      "button",
+      { name: "Skill 0" },
+      { timeout: 5000 },
+    );
 
     await user.click(firstSkillButton);
 
@@ -146,14 +152,14 @@ describe("App local skill detail navigation", () => {
     renderApp();
 
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Skill 0" }));
+    await user.click(await screen.findByRole("button", { name: "Skill 0" }, { timeout: 5000 }));
     await screen.findByText("Skill content");
 
     await user.click(screen.getByTitle("Update from Git"));
     expect(screen.getByTitle("Updating...")).toBeInTheDocument();
 
     await user.click(screen.getByTitle("Back"));
-    await user.click(await screen.findByRole("button", { name: "Skill 1" }));
+    await user.click(await screen.findByRole("button", { name: "Skill 1" }, { timeout: 5000 }));
 
     expect(await screen.findByRole("heading", { name: "Skill 1" })).toBeInTheDocument();
     expect(screen.queryByTitle("Updating...")).not.toBeInTheDocument();
