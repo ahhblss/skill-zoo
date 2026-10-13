@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.52] — 2026-10-13
+
+### Fixed
+- Opening a directory from the app on macOS — a skill folder, an agent's skills directory, or the ZIP cache — now brings forward only the Finder window showing that directory and selects it in its parent, instead of activating Finder and pulling every open Finder window to the front. Directories opened from the skill file tree take the same path, so all directory opening behaves consistently.
+
 ## [0.3.51] — 2026-10-11
 
 ### Added
