@@ -27,6 +27,8 @@ pub fn open_directory(app: &AppHandle, dir: &Path) -> Result<(), String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
+        use tauri_plugin_opener::OpenerExt;
+
         app.opener()
             .open_path(dir.to_string_lossy(), None::<&str>)
             .map_err(|e| e.to_string())
