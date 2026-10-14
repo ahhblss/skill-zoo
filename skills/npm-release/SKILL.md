@@ -125,6 +125,15 @@ programmatic API, re-add declarations *and* the `types`/`exports` wiring togethe
 
 If extra source, test, repo, log, or private files appear, fix the `files` whitelist or ignore rules before publishing.
 
+**Fifth gate: green CI on the pushed release commit.** The local checks run on one machine; CI runs on every platform the release must work on. Commit the release, push, and wait for the run before publishing:
+
+```bash
+git push origin main
+gh run watch "$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+```
+
+Code CI has not seen does not publish. On 2026-10-13 the release-adjacent `chore: update version.json for v0.3.52` commit landed on main with a failing Build.
+
 ## CLI Package Checks
 
 Before publishing a CLI package, verify the executable path matches `bin` and can start from the built artifact:
@@ -156,7 +165,7 @@ Do not commit generated tarballs or temporary install directories.
 
 ## Publishing
 
-Publish only after typecheck, tests, build, and `npm publish --dry-run` pass. Before the real `npm publish`, summarize the package name, version, dist tag, and tarball contents, then ask the user for explicit confirmation.
+Publish only after typecheck, tests, build, `npm publish --dry-run` pass, and the pushed release commit's CI run is green. Before the real `npm publish`, summarize the package name, version, dist tag, and tarball contents, then ask the user for explicit confirmation.
 
 **Log in first.** `--auth-type=web` authenticates `npm login`, not `npm publish` — publishing while unauthenticated fails with a 404 that masks the real cause. Ensure a valid token exists (see "Non-TTY browser authentication") before publishing, and drop `--auth-type=web` from the publish command.
 
@@ -179,6 +188,8 @@ If the machine's default registry is a read-only mirror (e.g. `registry.npmmirro
 
 Two different steps need browser auth, and npm handles them differently in agent environments (Claude Code, Cowork, CI):
 
+**Capture auth URLs from raw output only.** Run both commands so their full output lands in a file (a background task's output file), then grep that file for the URL. Never pipe `npm login` or `npm publish` themselves through `grep`, `sed`, `tail`, or any other filter: npm goes quiet while it polls for the browser authorization, and a filter's block buffer then holds the URL line indefinitely — the attempt has to be killed and rerun raw.
+
 **Login** — `npm login --auth-type=web` prints the full `https://www.npmjs.com/login?next=/login/cli/<id>` URL even without a TTY, so no `script` wrapper is needed. Just `open` the printed "Login at:" URL:
 
 ```bash
@@ -189,9 +200,9 @@ npm login --auth-type=web --registry https://registry.npmjs.org/
 **Publish 2FA (EOTP)** — when the account requires 2FA for publishing, `npm publish` fails with `EOTP` and prints its auth URL redacted as `***` (`https://www.npmjs.com/auth/cli/***`). Only this step needs a real TTY to reveal the URL. Use `script -q /dev/null`, and feed it a leading newline because npm's TTY prompt ("Press ENTER to open in the browser...") otherwise blocks before it polls for authentication:
 
 ```bash
-printf '\n' | script -q /dev/null npm publish --registry https://registry.npmjs.org/ 2>&1 &
-sleep 8
-# grep the real "Authenticate your account at:" URL from output, then:
+printf '\n' | script -q /dev/null npm publish --registry https://registry.npmjs.org/ 2>&1   # background task, RAW output
+# grep the background output FILE for the real "https://www.npmjs.com/auth/cli/<id>"
+# URL, then — never pipe the publish command itself through a filter:
 open "https://www.npmjs.com/auth/cli/<id>"
 ```
 
@@ -232,6 +243,8 @@ Do not include private account identifiers, browser auth URLs, npm auth IDs, aut
 | `npm publish` returns 404 / "do not have permission" | Not logged in — `--auth-type=web` does not authenticate at publish time | Run `npm login --auth-type=web --registry https://registry.npmjs.org/` first, then publish |
 | `npm error code EOTP` | Account requires 2FA for publishing | Either get the user's 6-digit TOTP and pass `--otp <code>`, or complete the browser web-OTP flow (see "Non-TTY browser authentication") |
 | Browser auth URL is `***` | npm redacted the publish OTP URL in non-TTY output | Wrap the publish in `script -q /dev/null` with a leading newline (see "Non-TTY browser authentication"), extract the real URL, then `open` it |
+| Auth URL never surfaces while "Authenticate your account at:" did | Publish output was piped through `grep` or another filter; npm's quiet auth polling left the URL in the filter's block buffer | Kill the attempt — nothing publishes without the browser flow — rerun with raw output, and grep the output file |
+| A platform test failure appears in CI after pushing the release commit | Code reached the release without ever passing CI | Fix, commit, push, wait for green; publish only commits whose CI run is green |
 | npm errors with `EPERM` on the `~/.npm` cache | Cache dir has root-owned files from an old npm bug | Run `sudo chown -R $(id -u):$(id -g) ~/.npm`, or use a temp cache via `--cache /tmp/xxx` |
 | `npm login` fails writing `~/.npmrc` (EPERM) | Home dir not writable from the agent sandbox | Log in with `--userconfig /tmp/xxx.npmrc` and pass the same `--userconfig` to `npm publish`; delete the file afterward |
 | Tests fail after version bump | Hardcoded expected version | Prefer asserting against `CLI_VERSION` |
@@ -260,10 +273,14 @@ npm test
 npm run build
 npm publish --dry-run
 
+# commit the release bump, push, and wait for CI — a green run is a publish precondition
+git push origin main
+gh run watch "$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+
 # summarize dry-run results and ask the user to confirm the real publish
 # if the account requires 2FA, the publish OTP URL is redacted as *** — wrap with script:
-printf '\n' | script -q /dev/null npm publish --registry https://registry.npmjs.org/ 2>&1 &
-# extract the "Authenticate your account at:" URL, open in browser, wait for user
+printf '\n' | script -q /dev/null npm publish --registry https://registry.npmjs.org/ 2>&1   # background task, RAW output
+# grep the output file for the "Authenticate your account at:" URL, open in browser, wait for user
 
 npm view skill-zoo@X.Y.Z version dist.tarball time --json
 npm dist-tag ls skill-zoo
