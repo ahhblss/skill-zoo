@@ -791,10 +791,10 @@ impl CliService {
 
     /// Reject decompression bombs before extracting: the archive's total
     /// declared uncompressed size must stay within
-    /// `max(zip_len * MAX_EXTRACT_RATIO, MIN_EXTRACT_BYTES)` bytes and the
+    /// `max(zip_len * MAX_EXTRACT_RATIO, MIN_EXTRACT_LIMIT_BYTES)` bytes and the
     /// entry count within `MAX_EXTRACT_FILES`. Scanning reads only the
     /// central directory, so nothing is written when validation fails.
-    fn validate_archive_scale<R: std::io::Read + std::io::Seek>(
+    pub(crate) fn validate_archive_scale<R: std::io::Read + std::io::Seek>(
         archive: &mut zip::ZipArchive<R>,
         zip_len: u64,
         max_ratio: u64,
@@ -858,7 +858,7 @@ impl CliService {
             &mut archive,
             zip_len,
             config::MAX_EXTRACT_RATIO,
-            config::MIN_EXTRACT_BYTES,
+            config::MIN_EXTRACT_LIMIT_BYTES,
             config::MAX_EXTRACT_FILES,
         )?;
 

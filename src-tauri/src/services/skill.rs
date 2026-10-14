@@ -1184,16 +1184,23 @@ impl SkillService {
             });
 
             let file = std::fs::File::open(&zip_path)?;
-            if let Ok(metadata) = file.metadata() {
-                if metadata.len() > config::MAX_DOWNLOAD_BYTES {
-                    return Err(AppError::BadRequest(format!(
-                        "Repository ZIP exceeds {}MB limit",
-                        config::MAX_DOWNLOAD_BYTES / (1024 * 1024)
-                    )));
-                }
+            let zip_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+            if zip_len > config::MAX_DOWNLOAD_BYTES {
+                return Err(AppError::BadRequest(format!(
+                    "Repository ZIP exceeds {}MB limit",
+                    config::MAX_DOWNLOAD_BYTES / (1024 * 1024)
+                )));
             }
 
             let mut archive = zip::ZipArchive::new(file)?;
+            CliService::validate_archive_scale(
+                &mut archive,
+                zip_len,
+                config::MAX_EXTRACT_RATIO,
+                config::MIN_EXTRACT_LIMIT_BYTES,
+                config::MAX_EXTRACT_FILES,
+            )?;
+
             let temp_dir = tempfile::tempdir()?;
             archive.extract(temp_dir.path())?;
 
@@ -3226,5 +3233,44 @@ mod tests {
             SkillService::extract_frontmatter("---\u{feff}\nname: demo\n---\nbody"),
             Some("\u{feff}\nname: demo".to_string())
         );
+    }
+
+    #[test]
+    fn discover_rejects_archive_scale_limits_before_extraction() {
+        // Entry-flood bomb at production thresholds: the 1 GiB byte floor
+        // makes a ratio bomb impractical to build in a test, so the wiring is
+        // proven through the entry-count guard (MAX_EXTRACT_FILES + 1).
+        let tmp = tempfile::tempdir().unwrap();
+        let zip_bytes = {
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            let options = zip::write::SimpleFileOptions::default();
+            for i in 0..=(crate::config::MAX_EXTRACT_FILES as u32) {
+                writer.start_file(format!("f-{i}"), options).unwrap();
+                std::io::Write::write_all(&mut writer, &[]).unwrap();
+            }
+            writer.finish().unwrap().into_inner()
+        };
+        config::with_test_home(tmp.path(), || {
+            let cache_path = CliService::cache_zip_path("bomb-owner", "flood-repo", None);
+            std::fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+            std::fs::write(&cache_path, zip_bytes).unwrap();
+
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let result = rt.block_on(SkillService::discover_from_repo(
+                "bomb-owner",
+                "flood-repo",
+                None,
+                false,
+                None,
+            ));
+            let err = result.unwrap_err();
+            assert!(
+                err.to_string().contains("exceeding the limit"),
+                "expected scale-limit rejection, got: {err}"
+            );
+        });
     }
 }
