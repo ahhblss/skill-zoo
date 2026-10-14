@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Palette } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ThemeSettings } from "@/components/settings/ThemeSettings";
@@ -18,6 +19,7 @@ export function SettingsView({
   onSkillCompanionOpenHandled?: () => void;
 }) {
   const { t } = useTranslation();
+  const [githubTokenOpen, setGithubTokenOpen] = useState(false);
 
   return (
     <div className="flex h-full">
@@ -42,8 +44,8 @@ export function SettingsView({
             </div>
 
             {/* Skill Maintenance */}
-            <SkillMaintenanceSettings />
-            <GitHubTokenSettings />
+            <SkillMaintenanceSettings onRequestGitHubTokenConfig={() => setGithubTokenOpen(true)} />
+            <GitHubTokenSettings open={githubTokenOpen} onOpenChange={setGithubTokenOpen} />
 
             {/* Skill Companion */}
             <SkillCompanionSettings

@@ -21,8 +21,9 @@ function renderSettings() {
   );
 }
 
-async function getInput() {
-  const input = await screen.findByLabelText("Personal access token");
+async function openDialog(label = "Personal access token") {
+  await userEvent.setup().click(screen.getByRole("button", { name: /set up|manage|配置|管理/i }));
+  const input = await screen.findByLabelText(label);
   await waitFor(() => expect(input).toBeEnabled());
   return input;
 }
@@ -41,21 +42,30 @@ describe("GitHubTokenSettings", () => {
         return Promise.resolve({ authenticated: true, limit: 5000 });
       }
       if (command === "update_setting") {
-        saved = (args as { value: string }).value;
+        const { key, value } = (args ?? {}) as { key?: string; value?: string };
+        if (key === "github_token") saved = value ?? "";
         return Promise.resolve();
       }
       return Promise.reject(new Error(`Unexpected command: ${command}`));
     });
   });
 
+  it("reflects the connection state on the row before any dialog is opened", async () => {
+    saved = "previous-token";
+    renderSettings();
+    expect(await screen.findByText("Token configured")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /manage/i })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("verifies the trimmed candidate before saving and reports the actual quota", async () => {
     const user = userEvent.setup();
     renderSettings();
-    const input = await getInput();
+    const input = await openDialog();
     expect(input).toHaveAttribute("type", "password");
     await user.type(input, "  candidate-token  ");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
-    await screen.findByText("Active · quota: 5000 requests/hour");
+    await screen.findAllByText("Active · quota: 5000 requests/hour");
     expect(invoke).toHaveBeenCalledWith("verify_github_token", { token: "candidate-token" });
     expect(invoke).toHaveBeenCalledWith("update_setting", {
       key: "github_token",
@@ -80,7 +90,7 @@ describe("GitHubTokenSettings", () => {
       });
       const user = userEvent.setup();
       renderSettings();
-      const input = await getInput();
+      const input = await openDialog();
       await user.clear(input);
       await user.type(input, "invalid-token");
       await user.click(screen.getByRole("button", { name: /^save$/i }));
@@ -104,7 +114,8 @@ describe("GitHubTokenSettings", () => {
     });
     const user = userEvent.setup();
     renderSettings();
-    await user.type(await getInput(), "candidate-token");
+    const input = await openDialog();
+    await user.type(input, "candidate-token");
     const button = screen.getByRole("button", { name: /^save$/i });
     await user.click(button);
     await screen.findByText("Verifying and saving…");
@@ -123,7 +134,8 @@ describe("GitHubTokenSettings", () => {
     });
     const user = userEvent.setup();
     renderSettings();
-    await user.type(await getInput(), "candidate-token");
+    const input = await openDialog();
+    await user.type(input, "candidate-token");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     await screen.findByText(/Verification failed/);
     expect(screen.queryByText(/raw candidate-token error/)).not.toBeInTheDocument();
@@ -141,7 +153,7 @@ describe("GitHubTokenSettings", () => {
     });
     const user = userEvent.setup();
     renderSettings();
-    const input = await getInput();
+    const input = await openDialog();
     await user.clear(input);
     await user.type(input, "candidate-token");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
@@ -155,11 +167,11 @@ describe("GitHubTokenSettings", () => {
     saved = "previous-token";
     const user = userEvent.setup();
     renderSettings();
-    const input = await getInput();
+    const input = await openDialog();
     await user.clear(input);
     await user.type(input, "   ");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
-    await screen.findByText("Not configured · anonymous quota: 60 requests/hour");
+    await screen.findAllByText("Not configured · anonymous quota: 60 requests/hour");
     expect(invoke).toHaveBeenCalledWith("update_setting", { key: "github_token", value: "" });
     expect(
       vi.mocked(invoke).mock.calls.some(([command]) => command === "verify_github_token"),
@@ -167,22 +179,91 @@ describe("GitHubTokenSettings", () => {
     expect(input).toHaveValue("");
   });
 
+  it("shows the verified token's expiry on the row and persists it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockImplementation((command, args) => {
+      if (command === "get_settings") return Promise.resolve({});
+      if (command === "verify_github_token") {
+        return Promise.resolve({
+          authenticated: true,
+          limit: 5000,
+          expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
+        });
+      }
+      if (command === "update_setting") {
+        const { key, value } = (args ?? {}) as { key?: string; value?: string };
+        if (key === "github_token") saved = value ?? "";
+        return Promise.resolve();
+      }
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+    renderSettings();
+    await openDialog();
+    await user.type(screen.getByLabelText("Personal access token"), "candidate-token");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    await screen.findAllByText(/Active · quota: 5000 requests\/hour · expires /);
+    expect(invoke).toHaveBeenCalledWith("update_setting", {
+      key: "github_token_expires_at",
+      value: expect.any(String),
+    });
+  });
+
+  it("warns when the verified token expires within seven days", async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === "get_settings") return Promise.resolve({});
+      if (command === "verify_github_token") {
+        return Promise.resolve({
+          authenticated: true,
+          limit: 5000,
+          expiresAt: new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString(),
+        });
+      }
+      if (command === "update_setting") return Promise.resolve();
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+    renderSettings();
+    await openDialog();
+    await user.type(screen.getByLabelText("Personal access token"), "candidate-token");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    await screen.findAllByText(/expires soon/);
+  });
+
+  it("flags an expired saved token on the row without a fresh verification", async () => {
+    saved = "previous-token";
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === "get_settings") {
+        return Promise.resolve({
+          github_token: saved,
+          github_token_expires_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+    renderSettings();
+    await screen.findByText(/Token expired/);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      vi.mocked(invoke).mock.calls.some(([command]) => command === "verify_github_token"),
+    ).toBe(false);
+  });
+
   it("distinguishes a saved token from a fresh verification and opens the creation page", async () => {
     saved = "previous-token";
     const user = userEvent.setup();
     renderSettings();
-    expect(await getInput()).toHaveValue("previous-token");
-    await screen.findByText("Token configured · save to verify its current quota");
+    expect(await screen.findByText("Token configured")).toBeInTheDocument();
     expect(
       vi.mocked(invoke).mock.calls.some(([command]) => command === "verify_github_token"),
     ).toBe(false);
+    await openDialog();
     await user.click(screen.getByRole("button", { name: "Open GitHub token creation page" }));
     expect(openUrl).toHaveBeenCalledWith("https://github.com/settings/personal-access-tokens/new");
   });
 
   it("does not submit Enter during IME composition", async () => {
     renderSettings();
-    const input = await getInput();
+    const input = await openDialog();
     fireEvent.change(input, { target: { value: "token" } });
     expect(fireEvent.keyDown(input, { key: "Enter", isComposing: true })).toBe(false);
     expect(
@@ -190,10 +271,11 @@ describe("GitHubTokenSettings", () => {
     ).toBe(false);
   });
 
-  it("provides Chinese public-only instructions and anonymous status", async () => {
+  it("provides Chinese public-only instructions inside the dialog and anonymous status on the row", async () => {
     await i18n.changeLanguage("zh");
     renderSettings();
     await screen.findByText("未配置 · 匿名配额 60 次/小时");
+    await openDialog("个人访问令牌");
     expect(
       screen.getByText("此 Token 不需要任何仓库权限，无法访问你的私有仓库。"),
     ).toBeInTheDocument();

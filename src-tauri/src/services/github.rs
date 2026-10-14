@@ -21,9 +21,32 @@ fn github_get_with_token(
 }
 
 #[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitHubTokenVerification {
     pub authenticated: bool,
     pub limit: u32,
+    pub expires_at: Option<String>,
+}
+
+/// GitHub reports a PAT's expiry only via this response header (absent for
+/// tokens without an expiry). Accepted forms: RFC 3339, or the documented
+/// "YYYY-MM-DD HH:MM:SS UTC" rendering, normalized to RFC 3339 for the UI.
+fn parse_token_expiration(value: &str) -> Option<String> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value.trim()) {
+        return Some(dt.to_rfc3339());
+    }
+    let without_zone = value.trim().strip_suffix(" UTC")?;
+    let naive = chrono::NaiveDateTime::parse_from_str(without_zone, "%Y-%m-%d %H:%M:%S").ok()?;
+    Some(naive.and_utc().to_rfc3339())
+}
+
+fn response_token_expiration(response: &reqwest::Response) -> Option<String> {
+    response
+        .headers()
+        .get("github-authentication-token-expiration")?
+        .to_str()
+        .ok()
+        .and_then(parse_token_expiration)
 }
 
 pub async fn verify_github_token(token: &str) -> Result<GitHubTokenVerification, String> {
@@ -49,6 +72,7 @@ async fn verify_github_token_at(
         return Ok(GitHubTokenVerification {
             authenticated: false,
             limit: 0,
+            expires_at: None,
         });
     }
     if response.status() != reqwest::StatusCode::OK {
@@ -69,6 +93,8 @@ async fn verify_github_token_at(
     struct Core {
         limit: u32,
     }
+    // Read headers before `.json()` consumes the response.
+    let expires_at = response_token_expiration(&response);
     let rate: RateLimit = response
         .json()
         .await
@@ -77,6 +103,7 @@ async fn verify_github_token_at(
     Ok(GitHubTokenVerification {
         authenticated: !token.trim().is_empty() && limit >= 5000,
         limit,
+        expires_at,
     })
 }
 
@@ -246,12 +273,55 @@ mod tests {
                 Some((authenticated, limit)) => {
                     let result = result.unwrap();
                     assert_eq!((result.authenticated, result.limit), (authenticated, limit));
+                    assert_eq!(result.expires_at, None);
                 }
                 None => assert!(result.is_err()),
             }
             mock.assert_async().await;
             mock.remove_async().await;
         }
+    }
+
+    #[tokio::test]
+    async fn candidate_verification_reports_token_expiration_header() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/rate_limit")
+            .match_header("authorization", "Bearer candidate-token")
+            .with_status(200)
+            .with_header(
+                "github-authentication-token-expiration",
+                "2026-11-13 16:14:49 UTC",
+            )
+            .with_body(r#"{"resources":{"core":{"limit":5000}}}"#)
+            .create_async()
+            .await;
+        let result = super::verify_github_token_at(
+            &reqwest::Client::new(),
+            &format!("{}/rate_limit", server.url()),
+            "candidate-token",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            result.expires_at.as_deref(),
+            Some("2026-11-13T16:14:49+00:00")
+        );
+        mock.assert_async().await;
+    }
+
+    #[test]
+    fn token_expiration_parsing_accepts_documented_and_rfc3339_forms_only() {
+        assert_eq!(
+            super::parse_token_expiration("2026-11-13 16:14:49 UTC").as_deref(),
+            Some("2026-11-13T16:14:49+00:00")
+        );
+        assert_eq!(
+            super::parse_token_expiration("2026-11-13T16:14:49Z").as_deref(),
+            Some("2026-11-13T16:14:49+00:00")
+        );
+        assert_eq!(super::parse_token_expiration("not a date"), None);
+        assert_eq!(super::parse_token_expiration(""), None);
     }
 
     #[test]

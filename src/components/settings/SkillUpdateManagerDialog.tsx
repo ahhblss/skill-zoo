@@ -49,6 +49,7 @@ interface SkillUpdateManagerDialogProps {
   isUpdating: boolean;
   onCheckUpdates: () => void;
   onUpdate: (updates: SkillUpdateCandidate[]) => void;
+  onRequestGitHubTokenConfig?: () => void;
 }
 
 type Tab = "updates" | "history";
@@ -90,6 +91,7 @@ export function SkillUpdateManagerDialog({
   isUpdating,
   onCheckUpdates,
   onUpdate,
+  onRequestGitHubTokenConfig,
 }: SkillUpdateManagerDialogProps) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("updates");
@@ -144,9 +146,7 @@ export function SkillUpdateManagerDialog({
           event.preventDefault();
           if (configureGitHubTokenRef.current) {
             configureGitHubTokenRef.current = false;
-            const input = document.getElementById("github-token");
-            input?.scrollIntoView({ block: "center" });
-            input?.focus({ preventScroll: true });
+            onRequestGitHubTokenConfig?.();
             return;
           }
           returnFocusRef.current?.focus();

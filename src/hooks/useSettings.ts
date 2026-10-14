@@ -17,11 +17,20 @@ const AGENT_ORDER_SETTING = "agent_order";
 const EMPTY_VISIBLE_AGENTS = Object.freeze({}) as VisibleAgents;
 
 const GITHUB_TOKEN_KEY = ["settings", "githubToken"] as const;
+const GITHUB_TOKEN_EXPIRES_KEY = ["settings", "githubTokenExpiresAt"] as const;
 
 export function useGitHubToken() {
   return useQuery({
     queryKey: GITHUB_TOKEN_KEY,
     queryFn: async () => (await settingsApi.getSettings())["github_token"] ?? "",
+    staleTime: 0,
+  });
+}
+
+export function useGitHubTokenExpiresAt() {
+  return useQuery({
+    queryKey: GITHUB_TOKEN_EXPIRES_KEY,
+    queryFn: async () => (await settingsApi.getSettings())["github_token_expires_at"] ?? "",
     staleTime: 0,
   });
 }
@@ -38,6 +47,10 @@ export function useSaveGitHubToken() {
       }
       try {
         await settingsApi.updateSetting("github_token", token);
+        await settingsApi.updateSetting(
+          "github_token_expires_at",
+          (token && verification?.expiresAt) || "",
+        );
       } catch {
         throw new Error("githubTokenSaveFailed");
       }
@@ -46,6 +59,7 @@ export function useSaveGitHubToken() {
     onSuccess: ({ token }) => {
       qc.setQueryData(GITHUB_TOKEN_KEY, token);
       qc.invalidateQueries({ queryKey: GITHUB_TOKEN_KEY });
+      qc.invalidateQueries({ queryKey: GITHUB_TOKEN_EXPIRES_KEY });
     },
   });
 }

@@ -24,7 +24,11 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function SkillMaintenanceSettings() {
+export function SkillMaintenanceSettings({
+  onRequestGitHubTokenConfig,
+}: {
+  onRequestGitHubTokenConfig?: () => void;
+} = {}) {
   const { data: skills } = useInstalledSkills();
   const updateAllMutation = useUpdateAllSkills();
   const { data: hideNonSsot } = useHideNonSsot();
@@ -317,6 +321,7 @@ export function SkillMaintenanceSettings() {
         isUpdating={isUpdating}
         onCheckUpdates={() => checkMutation.mutate()}
         onUpdate={updateCheckedCandidates}
+        onRequestGitHubTokenConfig={onRequestGitHubTokenConfig}
       />
       <LocalImportsDialog open={localImportsOpen} onOpenChange={setLocalImportsOpen} />
     </section>

@@ -1,4 +1,5 @@
 import "@/i18n";
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -33,11 +34,22 @@ function renderSettings(withGitHubConnection = false) {
     },
   });
 
+  function Connected() {
+    const [githubOpen, setGithubOpen] = useState(false);
+    return (
+      <>
+        <SkillMaintenanceSettings onRequestGitHubTokenConfig={() => setGithubOpen(true)} />
+        {withGitHubConnection && (
+          <GitHubTokenSettings open={githubOpen} onOpenChange={setGithubOpen} />
+        )}
+      </>
+    );
+  }
+
   return render(
     <QueryClientProvider client={queryClient}>
       <BackgroundUpdates />
-      <SkillMaintenanceSettings />
-      {withGitHubConnection && <GitHubTokenSettings />}
+      <Connected />
     </QueryClientProvider>,
   );
 }
@@ -184,17 +196,16 @@ describe("SkillMaintenanceSettings", () => {
       }
     });
     renderSettings(true);
-    const input = await screen.findByLabelText("Personal access token");
-    input.scrollIntoView = vi.fn();
-    await waitFor(() => expect(input).toBeEnabled());
     await user.click(screen.getByRole("button", { name: /check updates/i }));
     await user.click(await screen.findByRole("button", { name: /update manager/i }));
     const links = await screen.findAllByRole("button", { name: "Configure GitHub Token" });
     expect(links).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Configure GitHub Token" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: /update manager/i })).not.toBeInTheDocument(),
+    );
+    const input = await screen.findByLabelText("Personal access token");
     await waitFor(() => expect(input).toHaveFocus());
-    expect(input.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
   });
 
   it("recovers the clear-cache button after clearing fails", async () => {
