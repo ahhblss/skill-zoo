@@ -16,6 +16,40 @@ export const skillUsageKey = (agent: string) => ["settings", "skillUsage", agent
 const AGENT_ORDER_SETTING = "agent_order";
 const EMPTY_VISIBLE_AGENTS = Object.freeze({}) as VisibleAgents;
 
+const GITHUB_TOKEN_KEY = ["settings", "githubToken"] as const;
+
+export function useGitHubToken() {
+  return useQuery({
+    queryKey: GITHUB_TOKEN_KEY,
+    queryFn: async () => (await settingsApi.getSettings())["github_token"] ?? "",
+    staleTime: 0,
+  });
+}
+
+export function useSaveGitHubToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (draft: string) => {
+      const token = draft.trim();
+      let verification = null;
+      if (token) {
+        verification = await settingsApi.verifyGitHubToken(token);
+        if (!verification.authenticated) throw new Error("githubTokenVerificationFailed");
+      }
+      try {
+        await settingsApi.updateSetting("github_token", token);
+      } catch {
+        throw new Error("githubTokenSaveFailed");
+      }
+      return { token, verification };
+    },
+    onSuccess: ({ token }) => {
+      qc.setQueryData(GITHUB_TOKEN_KEY, token);
+      qc.invalidateQueries({ queryKey: GITHUB_TOKEN_KEY });
+    },
+  });
+}
+
 export function useVisibleAgents() {
   return useQuery({
     queryKey: VISIBLE_AGENTS_KEY,

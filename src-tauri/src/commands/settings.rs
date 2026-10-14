@@ -112,8 +112,39 @@ pub fn update_setting(
     )
     .map_err(|e| e.to_string())?;
     let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
-    settings.set(key, value);
-    settings.save().map_err(|e| e.to_string())
+    save_setting(&mut settings, key, value)
+}
+
+fn save_setting(
+    settings: &mut crate::persistence::Settings,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    if key != "github_token" {
+        settings.set(key, value);
+        return settings.save().map_err(|e| e.to_string());
+    }
+
+    let previous = settings.clone();
+    let value = value.trim();
+    if value.is_empty() {
+        settings.values.remove(&key);
+    } else {
+        settings.set(key, value.to_string());
+    }
+    if let Err(error) = settings.save() {
+        *settings = previous;
+        return Err(error.to_string());
+    }
+    crate::config::set_github_token(Some(value));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn verify_github_token(
+    token: String,
+) -> Result<crate::services::github::GitHubTokenVerification, String> {
+    crate::services::github::verify_github_token(&token).await
 }
 
 #[tauri::command]
@@ -190,6 +221,73 @@ pub fn get_visible_agents(state: State<'_, AppState>) -> Result<HashMap<String, 
 mod tests {
     use super::decode_png_data_url;
     use base64::Engine;
+
+    #[test]
+    fn github_setting_refreshes_only_after_save_and_removes_blank_tokens() {
+        let home = tempfile::tempdir().unwrap();
+        crate::config::with_test_home(home.path(), || {
+            crate::config::with_test_github_token(None, || {
+                let mut settings = crate::persistence::Settings::load().unwrap();
+                super::save_setting(
+                    &mut settings,
+                    "github_token".into(),
+                    "  test-token \n".into(),
+                )
+                .unwrap();
+                assert_eq!(crate::config::github_token().as_deref(), Some("test-token"));
+                assert_eq!(
+                    crate::persistence::Settings::load()
+                        .unwrap()
+                        .get("github_token")
+                        .map(String::as_str),
+                    Some("test-token")
+                );
+                super::save_setting(&mut settings, "other".into(), "value".into()).unwrap();
+                assert_eq!(crate::config::github_token().as_deref(), Some("test-token"));
+                super::save_setting(&mut settings, "github_token".into(), " \n".into()).unwrap();
+                assert!(crate::config::github_token().is_none());
+                assert!(crate::persistence::Settings::load()
+                    .unwrap()
+                    .get("github_token")
+                    .is_none());
+                assert_eq!(settings.get("other").map(String::as_str), Some("value"));
+            });
+        });
+    }
+
+    #[test]
+    fn failed_github_setting_save_preserves_settings_and_runtime_token() {
+        let home = tempfile::tempdir().unwrap();
+        crate::config::with_test_home(home.path(), || {
+            crate::config::with_test_github_token(Some("previous-token"), || {
+                let mut settings = crate::persistence::Settings {
+                    values: std::collections::HashMap::from([(
+                        "github_token".into(),
+                        "previous-token".into(),
+                    )]),
+                };
+                // An existing directory at the file path makes atomic replacement fail.
+                std::fs::create_dir_all(crate::config::get_app_config_dir().join("settings.json"))
+                    .unwrap();
+                for candidate in ["new-token", ""] {
+                    assert!(super::save_setting(
+                        &mut settings,
+                        "github_token".into(),
+                        candidate.into()
+                    )
+                    .is_err());
+                    assert_eq!(
+                        settings.get("github_token").map(String::as_str),
+                        Some("previous-token")
+                    );
+                    assert_eq!(
+                        crate::config::github_token().as_deref(),
+                        Some("previous-token")
+                    );
+                }
+            });
+        });
+    }
 
     #[test]
     fn decodes_png_data_url() {

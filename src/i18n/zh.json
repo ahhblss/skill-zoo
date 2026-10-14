@@ -274,6 +274,28 @@
     "linkSuccess": "{{skill}} 已链接到 {{agent}}"
   },
   "settings": {
+    "github": {
+      "title": "GitHub 连接",
+      "label": "个人访问令牌",
+      "placeholder": "粘贴 GitHub Token",
+      "create": "打开 GitHub 创建页面",
+      "save": "保存",
+      "step1": "点击下方按钮打开 GitHub Token 创建页。",
+      "step2": "Repository access 选择 Public Repositories，权限什么都不用勾。",
+      "step3": "生成 Token 后复制并粘贴到这里。",
+      "permissions": "此 Token 不需要任何仓库权限，无法访问你的私有仓库。",
+      "clearHint": "清空输入框并保存，即可删除 Token，回到匿名模式。",
+      "unconfigured": "未配置 · 匿名配额 60 次/小时",
+      "configured": "已配置 Token · 保存可验证当前配额",
+      "active": "已生效 · 配额 {{limit}} 次/小时",
+      "saving": "正在验证并保存…",
+      "loading": "正在加载 GitHub 设置…",
+      "verifyFailed": "验证失败，请检查 Token 和网络连接后重试。已保存的 Token 未改变。",
+      "saveFailed": "Token 保存失败，之前的配置仍然生效。",
+      "loadFailed": "GitHub 设置加载失败，请重新打开设置页重试。",
+      "openFailed": "无法打开 GitHub Token 创建页",
+      "configure": "配置 GitHub Token"
+    },
     "appearance": "外观",
     "theme": {
       "title": "主题",

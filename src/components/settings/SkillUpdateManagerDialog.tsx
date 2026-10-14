@@ -95,6 +95,7 @@ export function SkillUpdateManagerDialog({
   const [tab, setTab] = useState<Tab>("updates");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const listRef = useRef<HTMLDivElement>(null);
+  const configureGitHubTokenRef = useRef(false);
   const historyQuery = useSkillUpdateHistory(open);
   const deleteHistory = useDeleteSkillUpdateHistoryRecord();
   const clearHistory = useClearSkillUpdateHistory();
@@ -145,6 +146,13 @@ export function SkillUpdateManagerDialog({
         onEscapeKeyDown={(event) => busy && event.preventDefault()}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
+          if (configureGitHubTokenRef.current) {
+            configureGitHubTokenRef.current = false;
+            const input = document.getElementById("github-token");
+            input?.scrollIntoView({ block: "center" });
+            input?.focus({ preventScroll: true });
+            return;
+          }
           returnFocusRef.current?.focus();
         }}
         className="flex h-[min(720px,calc(100vh-6rem))] w-[calc(100vw-2rem)] max-w-[640px] flex-col gap-0 overflow-hidden p-0 sm:rounded-xl"
@@ -302,6 +310,20 @@ export function SkillUpdateManagerDialog({
                               </Badge>
                             </div>
                             <p className="text-xs text-muted-foreground">{issue.message}</p>
+                            {issue.code === "rateLimited" && (
+                              <Button
+                                size="sm"
+                                variant="link"
+                                className="h-auto p-0 text-xs"
+                                disabled={busy}
+                                onClick={() => {
+                                  configureGitHubTokenRef.current = true;
+                                  onOpenChange(false);
+                                }}
+                              >
+                                {t("settings.github.configure")}
+                              </Button>
+                            )}
                           </div>
                         </div>
                       ))}

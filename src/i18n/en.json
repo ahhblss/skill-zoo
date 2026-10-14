@@ -274,6 +274,28 @@
     "linkSuccess": "{{skill}} linked to {{agent}}"
   },
   "settings": {
+    "github": {
+      "title": "GitHub Connection",
+      "label": "Personal access token",
+      "placeholder": "Paste your GitHub token",
+      "create": "Open GitHub token creation page",
+      "save": "Save",
+      "step1": "Open the GitHub token creation page using the button below.",
+      "step2": "For Repository access, choose Public Repositories. Leave all permissions unselected.",
+      "step3": "Generate the token, then copy and paste it here.",
+      "permissions": "This token needs no repository permissions and cannot access your private repositories.",
+      "clearHint": "Clear the input and save to remove the token and return to anonymous requests.",
+      "unconfigured": "Not configured · anonymous quota: 60 requests/hour",
+      "configured": "Token configured · save to verify its current quota",
+      "active": "Active · quota: {{limit}} requests/hour",
+      "saving": "Verifying and saving…",
+      "loading": "Loading GitHub settings…",
+      "verifyFailed": "Verification failed. Check your token and network connection, then try again. The saved token has not changed.",
+      "saveFailed": "Could not save the token. Your previous configuration is still active.",
+      "loadFailed": "Could not load GitHub settings. Reopen Settings to try again.",
+      "openFailed": "Could not open the GitHub token creation page",
+      "configure": "Configure GitHub Token"
+    },
     "appearance": "Appearance",
     "theme": {
       "title": "Theme",

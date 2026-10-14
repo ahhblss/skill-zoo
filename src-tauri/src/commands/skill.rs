@@ -2530,8 +2530,7 @@ async fn fetch_github_repo_metadata(owner: &str, name: &str) -> Result<DiscoverR
     let url = format!("https://api.github.com/repos/{owner}/{name}");
     let client = config::http_client();
 
-    match client
-        .get(&url)
+    match crate::services::github::github_get(client, &url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
@@ -2776,8 +2775,7 @@ async fn fetch_repo_readme(
     };
     let client = config::http_client();
 
-    let resp = client
-        .get(&url)
+    let resp = crate::services::github::github_get(client, &url)
         .send()
         .await
         .map_err(|e| classify_download_error(format!("{owner}/{name}"), e))?;

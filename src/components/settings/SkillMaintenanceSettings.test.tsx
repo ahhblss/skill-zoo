@@ -7,6 +7,9 @@ import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { SkillMaintenanceSettings } from "./SkillMaintenanceSettings";
+import { GitHubTokenSettings } from "./GitHubTokenSettings";
+
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 vi.mock("sonner", () => ({
   toast: {
@@ -16,7 +19,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-function renderSettings() {
+function renderSettings(withGitHubConnection = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -27,6 +30,7 @@ function renderSettings() {
   return render(
     <QueryClientProvider client={queryClient}>
       <SkillMaintenanceSettings />
+      {withGitHubConnection && <GitHubTokenSettings />}
     </QueryClientProvider>,
   );
 }
@@ -53,6 +57,61 @@ describe("SkillMaintenanceSettings", () => {
           return Promise.reject(new Error(`Unexpected command: ${command}`));
       }
     });
+  });
+
+  it("takes rate-limited update items to the GitHub token input on dialog close", async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockImplementation((command) => {
+      switch (command) {
+        case "get_installed_skills":
+          return Promise.resolve([
+            { id: "skill:limited", directory: "limited", origin: "ssot" },
+            { id: "skill:missing", directory: "missing", origin: "ssot" },
+          ]);
+        case "get_settings":
+          return Promise.resolve({});
+        case "get_cache_size":
+          return Promise.resolve(0);
+        case "get_skill_update_history":
+          return Promise.resolve([]);
+        case "check_skill_updates":
+          return Promise.resolve({
+            skills: [
+              {
+                skillName: "limited",
+                hasUpdate: false,
+                repo: "owner/repo",
+                checkErrorCode: "rateLimited",
+                checkError: "Quota exhausted",
+              },
+              {
+                skillName: "missing",
+                hasUpdate: false,
+                repo: "owner/other",
+                checkErrorCode: "repoUnavailable",
+                checkError: "Repository missing",
+              },
+            ],
+            totalRepos: 2,
+            checkedRepos: 1,
+            rateLimited: true,
+          });
+        default:
+          return Promise.reject(new Error(`Unexpected command: ${command}`));
+      }
+    });
+    renderSettings(true);
+    const input = await screen.findByLabelText("Personal access token");
+    input.scrollIntoView = vi.fn();
+    await waitFor(() => expect(input).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: /check updates/i }));
+    await user.click(await screen.findByRole("button", { name: /update manager/i }));
+    const links = await screen.findAllByRole("button", { name: "Configure GitHub Token" });
+    expect(links).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Configure GitHub Token" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(input.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
   });
 
   it("recovers the clear-cache button after clearing fails", async () => {

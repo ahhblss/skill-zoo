@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ThemeSettings } from "@/components/settings/ThemeSettings";
 import { LanguageSettings } from "@/components/settings/LanguageSettings";
 import { SkillMaintenanceSettings } from "@/components/settings/SkillMaintenanceSettings";
+import { GitHubTokenSettings } from "@/components/settings/GitHubTokenSettings";
 import { SkillCompanionSettings } from "@/components/settings/SkillCompanionSettings";
 import { AgentPathsSettings } from "@/components/settings/AgentPathsSettings";
 import { AboutSection } from "@/components/settings/AboutSection";
@@ -42,6 +43,7 @@ export function SettingsView({
 
             {/* Skill Maintenance */}
             <SkillMaintenanceSettings />
+            <GitHubTokenSettings />
 
             {/* Skill Companion */}
             <SkillCompanionSettings

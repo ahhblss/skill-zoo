@@ -532,16 +532,30 @@ impl CliService {
         );
         let client = config::http_client();
 
-        let resp = client
-            .get(&url)
+        let resp = crate::services::github::github_get(client, &url)
             .header("Accept", "application/vnd.github.v3+json")
             .timeout(std::time::Duration::from_secs(30))
             .send()
             .await
             .map_err(|e| classify_download_error(format!("{owner}/{repo}"), e))?;
 
+        Self::parse_repo_tree_response(resp, &format!("{owner}/{repo}")).await
+    }
+
+    async fn parse_repo_tree_response(
+        resp: reqwest::Response,
+        repo: &str,
+    ) -> Result<Option<RepoTreeResponse>, AppError> {
         match resp.status().as_u16() {
-            403 | 429 => Err(AppError::RateLimited(format!("{owner}/{repo}"))),
+            403 if resp
+                .headers()
+                .get("x-ratelimit-remaining")
+                .is_some_and(|v| v == "0") =>
+            {
+                Err(AppError::RateLimited(repo.to_string()))
+            }
+            429 => Err(AppError::RateLimited(repo.to_string())),
+            403 => Err(AppError::DownloadUnavailable(repo.to_string())),
             200 => {
                 let json: RepoTreeResponse = resp.json().await.map_err(|e| {
                     AppError::Parse(format!("Invalid tree response from GitHub: {e}"))
@@ -1167,6 +1181,58 @@ impl CliService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn tree_forbidden_responses_only_stop_batches_when_quota_is_zero() {
+        let mut server = mockito::Server::new_async().await;
+        let client = reqwest::Client::new();
+        for (status, remaining, rate_limited) in [
+            (403, Some("0"), true),
+            (403, Some("42"), false),
+            (403, None, false),
+            (429, None, true),
+            (429, Some("42"), true),
+        ] {
+            let mut mock = server.mock("GET", "/tree").with_status(status);
+            if let Some(remaining) = remaining {
+                mock = mock.with_header("x-ratelimit-remaining", remaining);
+            }
+            let mock = mock.create_async().await;
+            let response = client
+                .get(format!("{}/tree", server.url()))
+                .send()
+                .await
+                .unwrap();
+            let result = CliService::parse_repo_tree_response(response, "owner/repo").await;
+            if rate_limited {
+                assert!(matches!(result, Err(AppError::RateLimited(_))));
+            } else {
+                assert!(matches!(result, Err(AppError::DownloadUnavailable(_))));
+            }
+            mock.assert_async().await;
+            mock.remove_async().await;
+        }
+        let mock = server
+            .mock("GET", "/tree")
+            .with_status(200)
+            .with_body(r#"{"sha":"new-sha","tree":[]}"#)
+            .create_async()
+            .await;
+        let response = client
+            .get(format!("{}/tree", server.url()))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            CliService::parse_repo_tree_response(response, "next/repo")
+                .await
+                .unwrap()
+                .unwrap()
+                .sha,
+            "new-sha"
+        );
+        mock.assert_async().await;
+    }
 
     #[test]
     fn install_preflight_rejects_existing_destination_before_writes() {

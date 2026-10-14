@@ -2,6 +2,84 @@ use crate::error::AppError;
 use regex::Regex;
 use std::sync::LazyLock;
 
+/// Only GitHub API consumers use this builder; archive and external requests
+/// must never inherit the desktop token as a client-wide default header.
+pub fn github_get(client: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+    github_get_with_token(client, url, crate::config::github_token().as_deref())
+}
+
+fn github_get_with_token(
+    client: &reqwest::Client,
+    url: &str,
+    token: Option<&str>,
+) -> reqwest::RequestBuilder {
+    let request = client.get(url);
+    match token.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(token) => request.bearer_auth(token),
+        None => request,
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct GitHubTokenVerification {
+    pub authenticated: bool,
+    pub limit: u32,
+}
+
+pub async fn verify_github_token(token: &str) -> Result<GitHubTokenVerification, String> {
+    verify_github_token_at(
+        crate::config::http_client(),
+        "https://api.github.com/rate_limit",
+        token,
+    )
+    .await
+}
+
+async fn verify_github_token_at(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+) -> Result<GitHubTokenVerification, String> {
+    let response = github_get_with_token(client, url, Some(token))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|_| "Could not reach GitHub to verify token".to_string())?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Ok(GitHubTokenVerification {
+            authenticated: false,
+            limit: 0,
+        });
+    }
+    if response.status() != reqwest::StatusCode::OK {
+        return Err(format!(
+            "GitHub token verification returned HTTP {}",
+            response.status().as_u16()
+        ));
+    }
+    #[derive(serde::Deserialize)]
+    struct RateLimit {
+        resources: Resources,
+    }
+    #[derive(serde::Deserialize)]
+    struct Resources {
+        core: Core,
+    }
+    #[derive(serde::Deserialize)]
+    struct Core {
+        limit: u32,
+    }
+    let rate: RateLimit = response
+        .json()
+        .await
+        .map_err(|_| "Invalid GitHub rate-limit response".to_string())?;
+    let limit = rate.resources.core.limit;
+    Ok(GitHubTokenVerification {
+        authenticated: !token.trim().is_empty() && limit >= 5000,
+        limit,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitHubRepoRef {
     pub owner: String,
@@ -92,6 +170,89 @@ pub fn validate_repo_segments(owner: &str, name: &str, branch: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::{parse_repo_query, parse_repo_ref};
+
+    #[test]
+    fn github_api_requests_capture_current_token_for_all_endpoint_shapes() {
+        crate::config::with_test_github_token(None, || {
+            let client = reqwest::Client::new();
+            for path in [
+                "/repos/o/r/git/trees/HEAD?recursive=1",
+                "/repos/o/r",
+                "/repos/o/r/readme",
+                "/repos/o/r/readme?ref=dev",
+            ] {
+                let url = format!("https://api.github.com{path}");
+                assert!(!super::github_get(&client, &url)
+                    .build()
+                    .unwrap()
+                    .headers()
+                    .contains_key("authorization"));
+                crate::config::set_github_token(Some("  saved-token  "));
+                let request = super::github_get(&client, &url).build().unwrap();
+                assert_eq!(request.headers()["authorization"], "Bearer saved-token");
+                crate::config::set_github_token(None);
+            }
+            // The shared client must not authenticate unrelated downloads.
+            crate::config::set_github_token(Some("saved-token"));
+            assert!(!client
+                .get("https://github.com/o/r/archive/HEAD.zip")
+                .build()
+                .unwrap()
+                .headers()
+                .contains_key("authorization"));
+        });
+    }
+
+    #[tokio::test]
+    async fn candidate_verification_uses_candidate_and_checks_http_and_quota() {
+        let mut server = mockito::Server::new_async().await;
+        let client = reqwest::Client::new();
+        for (status, body, expected) in [
+            (
+                200,
+                r#"{"resources":{"core":{"limit":5000}}}"#,
+                Some((true, 5000)),
+            ),
+            (
+                200,
+                r#"{"resources":{"core":{"limit":15000}}}"#,
+                Some((true, 15000)),
+            ),
+            (
+                200,
+                r#"{"resources":{"core":{"limit":60}}}"#,
+                Some((false, 60)),
+            ),
+            (401, "invalid", Some((false, 0))),
+            (403, "forbidden", None),
+            (500, "unavailable", None),
+            (200, r#"{"resources":{}}"#, None),
+            (200, "not JSON", None),
+        ] {
+            let mock = server
+                .mock("GET", "/rate_limit")
+                .match_header("authorization", "Bearer candidate-token")
+                .with_status(status)
+                .with_body(body)
+                .create_async()
+                .await;
+            let result = super::verify_github_token_at(
+                &client,
+                &format!("{}/rate_limit", server.url()),
+                " candidate-token \n",
+            )
+            .await;
+            match expected {
+                Some((authenticated, limit)) => {
+                    let result = result.unwrap();
+                    assert_eq!((result.authenticated, result.limit), (authenticated, limit));
+                }
+                None => assert!(result.is_err()),
+            }
+            mock.assert_async().await;
+            mock.remove_async().await;
+        }
+    }
 
     #[test]
     fn repo_ref_preserves_unknown_default_branch() {

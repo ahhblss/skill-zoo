@@ -8,6 +8,11 @@ import type {
   VisibleAgents,
 } from "@/types/skills";
 
+export interface GitHubTokenVerification {
+  authenticated: boolean;
+  limit: number;
+}
+
 export const settingsApi = {
   previewCustomAgent: (name: string, skillsDir: string, agentId?: string) =>
     invoke<AgentPreview>("preview_custom_agent", { name, skillsDir, agentId }),
@@ -25,6 +30,9 @@ export const settingsApi = {
   getSettings: () => invoke<Record<string, string>>("get_settings"),
 
   updateSetting: (key: string, value: string) => invoke<void>("update_setting", { key, value }),
+
+  verifyGitHubToken: (token: string) =>
+    invoke<GitHubTokenVerification>("verify_github_token", { token }),
 
   getSkillCompanionItems: () => invoke<SkillCompanionItem[]>("get_skill_companion_items"),
 

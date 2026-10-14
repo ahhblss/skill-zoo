@@ -27,6 +27,56 @@ pub fn http_client() -> &'static reqwest::Client {
     })
 }
 
+static GITHUB_TOKEN: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
+
+pub fn github_token() -> Option<String> {
+    #[cfg(test)]
+    if let Some(token) = TEST_GITHUB_TOKEN.with(|v| v.borrow().clone()) {
+        return token;
+    }
+    GITHUB_TOKEN
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+pub fn set_github_token(token: Option<&str>) {
+    let token = token
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned);
+    #[cfg(test)]
+    if TEST_GITHUB_TOKEN.with(|v| {
+        let mut current = v.borrow_mut();
+        if current.is_some() {
+            *current = Some(token.clone());
+            true
+        } else {
+            false
+        }
+    }) {
+        return;
+    }
+    *GITHUB_TOKEN.write().unwrap_or_else(|e| e.into_inner()) = token;
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_GITHUB_TOKEN: std::cell::RefCell<Option<Option<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_github_token<T>(token: Option<&str>, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Option<String>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_GITHUB_TOKEN.with(|v| *v.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(TEST_GITHUB_TOKEN.with(|v| v.replace(Some(token.map(str::to_owned)))));
+    run()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentConfig {
