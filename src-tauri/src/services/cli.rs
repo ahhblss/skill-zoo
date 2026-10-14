@@ -789,6 +789,57 @@ impl CliService {
         Ok(cache_path)
     }
 
+    /// Reject decompression bombs before extracting: the archive's total
+    /// declared uncompressed size must stay within
+    /// `max(zip_len * MAX_EXTRACT_RATIO, MIN_EXTRACT_BYTES)` bytes and the
+    /// entry count within `MAX_EXTRACT_FILES`. Scanning reads only the
+    /// central directory, so nothing is written when validation fails.
+    fn validate_archive_scale<R: std::io::Read + std::io::Seek>(
+        archive: &mut zip::ZipArchive<R>,
+        zip_len: u64,
+        max_ratio: u64,
+        min_bytes: u64,
+        max_files: usize,
+    ) -> Result<(), AppError> {
+        let mut total_bytes: u64 = 0;
+        for i in 0..archive.len() {
+            let entry = archive
+                .by_index_raw(i)
+                .map_err(|e| AppError::Cli(format!("Invalid archive: {e}")))?;
+            total_bytes = total_bytes.saturating_add(entry.size());
+        }
+        Self::check_archive_limits(
+            zip_len,
+            total_bytes,
+            archive.len(),
+            max_ratio,
+            min_bytes,
+            max_files,
+        )
+    }
+
+    fn check_archive_limits(
+        zip_len: u64,
+        total_bytes: u64,
+        entry_count: usize,
+        max_ratio: u64,
+        min_bytes: u64,
+        max_files: usize,
+    ) -> Result<(), AppError> {
+        if entry_count > max_files {
+            return Err(AppError::Cli(format!(
+                "Archive contains {entry_count} entries, exceeding the limit of {max_files}"
+            )));
+        }
+        let limit = zip_len.saturating_mul(max_ratio).max(min_bytes);
+        if total_bytes > limit {
+            return Err(AppError::Cli(format!(
+                "Archive decompresses to {total_bytes} bytes, exceeding the limit of {limit} bytes"
+            )));
+        }
+        Ok(())
+    }
+
     /// Download a GitHub repo as ZIP and extract to a temp directory.
     /// Returns (TempDir, root_path) — TempDir must stay alive while root_path is used.
     async fn download_repo_zip(
@@ -800,8 +851,16 @@ impl CliService {
         let zip_path = Self::ensure_cached_zip(owner, repo, branch, force).await?;
 
         let file = std::fs::File::open(&zip_path).map_err(AppError::Io)?;
+        let zip_len = file.metadata().map_err(AppError::Io)?.len();
         let mut archive = zip::ZipArchive::new(file)
             .map_err(|e| AppError::Cli(format!("Invalid archive: {e}")))?;
+        Self::validate_archive_scale(
+            &mut archive,
+            zip_len,
+            config::MAX_EXTRACT_RATIO,
+            config::MIN_EXTRACT_BYTES,
+            config::MAX_EXTRACT_FILES,
+        )?;
 
         let temp_dir = tempfile::tempdir()?;
         archive
@@ -1898,5 +1957,70 @@ mod tests {
             updated_at: None,
             commit_sha: commit_sha.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn archive_limits_reject_ratio_bomb() {
+        // 1 KiB archive claiming 10 MiB uncompressed, floor 1 MiB → limit 1 MiB.
+        let err = CliService::check_archive_limits(1024, 10 * 1024 * 1024, 3, 4, 1024 * 1024, 100)
+            .unwrap_err();
+        assert!(err.to_string().contains("decompresses to"));
+    }
+
+    #[test]
+    fn archive_limits_reject_entry_flood() {
+        let err = CliService::check_archive_limits(1024, 500, 6, 4, 0, 5).unwrap_err();
+        assert!(err.to_string().contains("entries"));
+    }
+
+    #[test]
+    fn archive_limits_accept_normal_and_floor_boundary() {
+        // Ratio within limit: limit = max(zip_len * 4, floor).
+        CliService::check_archive_limits(1024 * 1024, 3 * 1024 * 1024, 10, 4, 1024 * 1024, 100)
+            .unwrap();
+        // Exactly at the floor-derived limit passes; one byte over fails.
+        CliService::check_archive_limits(0, 1024 * 1024, 1, 4, 1024 * 1024, 100).unwrap();
+        assert!(
+            CliService::check_archive_limits(0, 1024 * 1024 + 1, 1, 4, 1024 * 1024, 100).is_err()
+        );
+    }
+
+    fn in_memory_zip(entry_sizes: &[usize]) -> (zip::ZipArchive<std::io::Cursor<Vec<u8>>>, u64) {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        for (i, size) in entry_sizes.iter().enumerate() {
+            writer.start_file(format!("file-{i}.txt"), options).unwrap();
+            std::io::Write::write_all(&mut writer, &vec![b'x'; *size]).unwrap();
+        }
+        let cursor = writer.finish().unwrap();
+        let zip_len = cursor.get_ref().len() as u64;
+        let archive = zip::ZipArchive::new(cursor).unwrap();
+        (archive, zip_len)
+    }
+
+    #[test]
+    fn validate_archive_scale_accepts_normal_archive() {
+        let (mut archive, zip_len) = in_memory_zip(&[10, 20, 30]);
+        CliService::validate_archive_scale(&mut archive, zip_len, 4, 1024 * 1024, 100).unwrap();
+    }
+
+    #[test]
+    fn validate_archive_scale_rejects_real_ratio_bomb() {
+        // 1 MiB of compressible payload: the archive itself stays a few KiB,
+        // so a 4x ratio limit sits far below the declared 1 MiB total.
+        let (mut archive, zip_len) = in_memory_zip(&[1024 * 1024]);
+        let err = CliService::validate_archive_scale(&mut archive, zip_len, 4, 0, 100).unwrap_err();
+        assert!(err.to_string().contains("decompresses to"));
+
+        // A generous ratio admits the same archive.
+        let (mut archive, zip_len) = in_memory_zip(&[1024 * 1024]);
+        CliService::validate_archive_scale(&mut archive, zip_len, 2000, 0, 100).unwrap();
+    }
+
+    #[test]
+    fn validate_archive_scale_rejects_entry_flood() {
+        let (mut archive, zip_len) = in_memory_zip(&[1, 2, 3]);
+        let err = CliService::validate_archive_scale(&mut archive, zip_len, 4, 0, 2).unwrap_err();
+        assert!(err.to_string().contains("entries"));
     }
 }

@@ -4,6 +4,15 @@ use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 
 pub const MAX_DOWNLOAD_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 
+/// Extraction bomb guards, applied to a downloaded repo archive before it is
+/// unpacked. Legitimate repos rarely exceed ~4x decompressed-to-compressed
+/// ratio while bombs exceed it by orders of magnitude; `MIN_EXTRACT_BYTES`
+/// keeps ~1:1 media-heavy archives under the ratio from being rejected.
+pub const MAX_EXTRACT_RATIO: u64 = 4;
+pub const MIN_EXTRACT_BYTES: u64 = 1024 * 1024 * 1024;
+/// Caps many-tiny-entries bombs whose byte ratio stays under the limit.
+pub const MAX_EXTRACT_FILES: usize = 100_000;
+
 /// Directories to skip when scanning for skills.
 /// Matches the upstream `npx skills` CLI: <https://github.com/vercel-labs/skills>
 pub const SKIP_DIRS: &[&str] = &["node_modules", ".git", "dist", "build", "__pycache__"];

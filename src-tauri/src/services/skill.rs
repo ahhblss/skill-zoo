@@ -988,7 +988,9 @@ impl SkillService {
     }
 
     pub fn extract_frontmatter(content: &str) -> Option<String> {
-        let content = content.trim();
+        // Strip a leading UTF-8 BOM first: U+FEFF is not White_Space, so
+        // `trim` alone keeps it and `starts_with("---")` would fail.
+        let content = content.strip_prefix('\u{feff}').unwrap_or(content).trim();
         if content.starts_with("---") {
             let parts: Vec<&str> = content.splitn(3, "---").collect();
             if parts.len() >= 3 {
@@ -3191,5 +3193,38 @@ mod tests {
 
         assert!(skill.existing_path("secret.txt").is_err());
         assert!(skill.writable_path("secret.txt").is_err());
+    }
+
+    #[test]
+    fn extract_frontmatter_strips_leading_bom() {
+        let body = "---\nname: demo\ndescription: hi\n---\nbody";
+        let bom_body = format!("\u{feff}{body}");
+
+        assert_eq!(
+            SkillService::extract_frontmatter(&bom_body),
+            SkillService::extract_frontmatter(body)
+        );
+        assert_eq!(
+            SkillService::extract_frontmatter(&bom_body),
+            Some("name: demo\ndescription: hi".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_frontmatter_without_bom_unchanged() {
+        assert_eq!(
+            SkillService::extract_frontmatter("---\nname: demo\n---\nbody"),
+            Some("name: demo".to_string())
+        );
+        // BOM with no frontmatter still yields None.
+        assert_eq!(
+            SkillService::extract_frontmatter("\u{feff}# no frontmatter"),
+            None
+        );
+        // Interior BOM is content, not a marker — must not be stripped.
+        assert_eq!(
+            SkillService::extract_frontmatter("---\u{feff}\nname: demo\n---\nbody"),
+            Some("\u{feff}\nname: demo".to_string())
+        );
     }
 }
