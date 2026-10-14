@@ -78,7 +78,10 @@ pub fn run() {
                     values: std::collections::HashMap::new(),
                 });
 
-            config::set_github_token(settings.get("github_token").map(String::as_str));
+            config::set_github_credentials(
+                settings.get("github_token").map(String::as_str),
+                settings.get("github_token_expires_at").map(String::as_str),
+            );
             let app_state = AppState::new(skill_cache, metadata, settings);
             app.manage(app_state);
 
@@ -174,6 +177,7 @@ pub fn run() {
             commands::skill::write_skill_text,
             commands::settings::get_settings,
             commands::settings::update_setting,
+            commands::settings::save_github_credentials,
             commands::settings::verify_github_token,
             commands::settings::get_skill_companion_items,
             commands::settings::save_skill_companion_items,

@@ -112,31 +112,54 @@ pub fn update_setting(
     )
     .map_err(|e| e.to_string())?;
     let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
-    save_setting(&mut settings, key, value)
+    settings.set(key, value);
+    settings.save().map_err(|e| e.to_string())
 }
 
-fn save_setting(
-    settings: &mut crate::persistence::Settings,
-    key: String,
-    value: String,
+/// Owns the GitHub credential keys: token and expiry persist in one settings
+/// write, so runtime authentication can never pair a new token with a stale
+/// expiry, and the runtime slot refreshes only after the save succeeds.
+#[tauri::command]
+pub fn save_github_credentials(
+    state: State<'_, AppState>,
+    token: String,
+    expires_at: Option<String>,
 ) -> Result<(), String> {
-    if key != "github_token" {
-        settings.set(key, value);
-        return settings.save().map_err(|e| e.to_string());
-    }
+    let _agent_lease = crate::persistence::agent_transaction::AgentLease::acquire(
+        &crate::config::get_app_config_dir(),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
+    persist_github_credentials(&mut settings, &token, expires_at.as_deref().unwrap_or(""))
+}
 
+fn persist_github_credentials(
+    settings: &mut crate::persistence::Settings,
+    token: &str,
+    expires_at: &str,
+) -> Result<(), String> {
+    let token = token.trim();
+    let expires_at = expires_at.trim();
     let previous = settings.clone();
-    let value = value.trim();
-    if value.is_empty() {
-        settings.values.remove(&key);
+    if token.is_empty() {
+        settings.values.remove("github_token");
+        settings.values.remove("github_token_expires_at");
     } else {
-        settings.set(key, value.to_string());
+        settings.set("github_token".to_string(), token.to_string());
+        if expires_at.is_empty() {
+            settings.values.remove("github_token_expires_at");
+        } else {
+            settings.set(
+                "github_token_expires_at".to_string(),
+                expires_at.to_string(),
+            );
+        }
     }
     if let Err(error) = settings.save() {
         *settings = previous;
         return Err(error.to_string());
     }
-    crate::config::set_github_token(Some(value));
+    crate::config::set_github_credentials(Some(token), Some(expires_at));
     Ok(())
 }
 
@@ -223,69 +246,92 @@ mod tests {
     use base64::Engine;
 
     #[test]
-    fn github_setting_refreshes_only_after_save_and_removes_blank_tokens() {
+    fn github_credentials_save_persists_expiry_atomically_and_refreshes_runtime() {
         let home = tempfile::tempdir().unwrap();
         crate::config::with_test_home(home.path(), || {
-            crate::config::with_test_github_token(None, || {
+            crate::config::with_test_github_credentials(None, None, || {
                 let mut settings = crate::persistence::Settings::load().unwrap();
-                super::save_setting(
-                    &mut settings,
-                    "github_token".into(),
-                    "  test-token \n".into(),
-                )
-                .unwrap();
+                settings.set("other".into(), "value".into());
+                let future = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+                super::persist_github_credentials(&mut settings, "  test-token \n", &future)
+                    .unwrap();
                 assert_eq!(crate::config::github_token().as_deref(), Some("test-token"));
+                let persisted = crate::persistence::Settings::load().unwrap();
+                assert_eq!(
+                    persisted.get("github_token").map(String::as_str),
+                    Some("test-token")
+                );
+                assert_eq!(
+                    persisted.get("github_token_expires_at").map(String::as_str),
+                    Some(future.as_str())
+                );
+                assert_eq!(persisted.get("other").map(String::as_str), Some("value"));
+
+                // A passed expiry stays persisted and stops authenticating.
+                let past = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+                super::persist_github_credentials(&mut settings, "test-token", &past).unwrap();
+                assert!(crate::config::github_token().is_none());
                 assert_eq!(
                     crate::persistence::Settings::load()
                         .unwrap()
-                        .get("github_token")
+                        .get("github_token_expires_at")
                         .map(String::as_str),
-                    Some("test-token")
+                    Some(past.as_str())
                 );
-                super::save_setting(&mut settings, "other".into(), "value".into()).unwrap();
-                assert_eq!(crate::config::github_token().as_deref(), Some("test-token"));
-                super::save_setting(&mut settings, "github_token".into(), " \n".into()).unwrap();
+
+                // Blank input removes both keys and runtime credentials.
+                super::persist_github_credentials(&mut settings, " \n", "").unwrap();
                 assert!(crate::config::github_token().is_none());
-                assert!(crate::persistence::Settings::load()
-                    .unwrap()
-                    .get("github_token")
-                    .is_none());
-                assert_eq!(settings.get("other").map(String::as_str), Some("value"));
+                let persisted = crate::persistence::Settings::load().unwrap();
+                assert!(persisted.get("github_token").is_none());
+                assert!(persisted.get("github_token_expires_at").is_none());
             });
         });
     }
 
     #[test]
-    fn failed_github_setting_save_preserves_settings_and_runtime_token() {
+    fn failed_github_credentials_save_preserves_settings_and_runtime_credentials() {
         let home = tempfile::tempdir().unwrap();
         crate::config::with_test_home(home.path(), || {
-            crate::config::with_test_github_token(Some("previous-token"), || {
-                let mut settings = crate::persistence::Settings {
-                    values: std::collections::HashMap::from([(
-                        "github_token".into(),
-                        "previous-token".into(),
-                    )]),
-                };
-                // An existing directory at the file path makes atomic replacement fail.
-                std::fs::create_dir_all(crate::config::get_app_config_dir().join("settings.json"))
-                    .unwrap();
-                for candidate in ["new-token", ""] {
-                    assert!(super::save_setting(
-                        &mut settings,
-                        "github_token".into(),
-                        candidate.into()
+            let future = (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+            crate::config::with_test_github_credentials(
+                Some("previous-token"),
+                Some(&future),
+                || {
+                    let mut settings = crate::persistence::Settings {
+                        values: std::collections::HashMap::from([
+                            ("github_token".into(), "previous-token".into()),
+                            ("github_token_expires_at".into(), future.clone()),
+                        ]),
+                    };
+                    // An existing directory at the file path makes atomic replacement fail.
+                    std::fs::create_dir_all(
+                        crate::config::get_app_config_dir().join("settings.json"),
                     )
-                    .is_err());
-                    assert_eq!(
-                        settings.get("github_token").map(String::as_str),
-                        Some("previous-token")
-                    );
-                    assert_eq!(
-                        crate::config::github_token().as_deref(),
-                        Some("previous-token")
-                    );
-                }
-            });
+                    .unwrap();
+                    let expired = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+                    for (token, expires_at) in [("new-token", expired.as_str()), ("", "")] {
+                        assert!(super::persist_github_credentials(
+                            &mut settings,
+                            token,
+                            expires_at
+                        )
+                        .is_err());
+                        assert_eq!(
+                            settings.get("github_token").map(String::as_str),
+                            Some("previous-token")
+                        );
+                        assert_eq!(
+                            settings.get("github_token_expires_at").map(String::as_str),
+                            Some(future.as_str())
+                        );
+                        assert_eq!(
+                            crate::config::github_token().as_deref(),
+                            Some("previous-token")
+                        );
+                    }
+                },
+            );
         });
     }
 

@@ -33,6 +33,9 @@ export const settingsApi = {
 
   updateSetting: (key: string, value: string) => invoke<void>("update_setting", { key, value }),
 
+  saveGitHubCredentials: (token: string, expiresAt: string | null) =>
+    invoke<void>("save_github_credentials", { token, expiresAt }),
+
   verifyGitHubToken: (token: string) =>
     invoke<GitHubTokenVerification>("verify_github_token", { token }),
 

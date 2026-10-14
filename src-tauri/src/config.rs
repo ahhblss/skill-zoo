@@ -27,29 +27,62 @@ pub fn http_client() -> &'static reqwest::Client {
     })
 }
 
-static GITHUB_TOKEN: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
-
-pub fn github_token() -> Option<String> {
-    #[cfg(test)]
-    if let Some(token) = TEST_GITHUB_TOKEN.with(|v| v.borrow().clone()) {
-        return token;
-    }
-    GITHUB_TOKEN
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
+/// Saved desktop GitHub credentials: the token plus the expiry GitHub reported
+/// for it. `expires_at` is `None` when GitHub reports no expiry or the stored
+/// value cannot be read, which keeps the token attached — only a token that is
+/// *known* to be expired falls back to anonymous requests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitHubCredentials {
+    pub token: String,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-pub fn set_github_token(token: Option<&str>) {
-    let token = token
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(str::to_owned);
+impl GitHubCredentials {
+    fn from_settings(token: Option<&str>, expires_at: Option<&str>) -> Option<Self> {
+        let token = token.map(str::trim).filter(|v| !v.is_empty())?;
+        Some(Self {
+            token: token.to_owned(),
+            expires_at: expires_at
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+                .map(|expires_at| expires_at.with_timezone(&chrono::Utc)),
+        })
+    }
+
+    fn is_expired(&self) -> bool {
+        self.expires_at
+            .is_some_and(|expires_at| expires_at <= chrono::Utc::now())
+    }
+}
+
+static GITHUB_CREDENTIALS: LazyLock<RwLock<Option<GitHubCredentials>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+/// The bearer token to attach to GitHub API requests: the saved token while it
+/// is present and not past its recorded expiry, `None` otherwise (anonymous).
+pub fn github_token() -> Option<String> {
     #[cfg(test)]
-    if TEST_GITHUB_TOKEN.with(|v| {
+    if let Some(credentials) = TEST_GITHUB_CREDENTIALS.with(|v| v.borrow().clone()) {
+        return credentials
+            .filter(|credentials| !credentials.is_expired())
+            .map(|credentials| credentials.token);
+    }
+    GITHUB_CREDENTIALS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .filter(|credentials| !credentials.is_expired())
+        .map(|credentials| credentials.token.clone())
+}
+
+pub fn set_github_credentials(token: Option<&str>, expires_at: Option<&str>) {
+    let credentials = GitHubCredentials::from_settings(token, expires_at);
+    #[cfg(test)]
+    if TEST_GITHUB_CREDENTIALS.with(|v| {
         let mut current = v.borrow_mut();
         if current.is_some() {
-            *current = Some(token.clone());
+            *current = Some(credentials.clone());
             true
         } else {
             false
@@ -57,23 +90,33 @@ pub fn set_github_token(token: Option<&str>) {
     }) {
         return;
     }
-    *GITHUB_TOKEN.write().unwrap_or_else(|e| e.into_inner()) = token;
+    *GITHUB_CREDENTIALS
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) = credentials;
 }
 
 #[cfg(test)]
 thread_local! {
-    static TEST_GITHUB_TOKEN: std::cell::RefCell<Option<Option<String>>> = const { std::cell::RefCell::new(None) };
+    static TEST_GITHUB_CREDENTIALS: std::cell::RefCell<Option<Option<GitHubCredentials>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
-pub(crate) fn with_test_github_token<T>(token: Option<&str>, run: impl FnOnce() -> T) -> T {
-    struct Restore(Option<Option<String>>);
+pub(crate) fn with_test_github_credentials<T>(
+    token: Option<&str>,
+    expires_at: Option<&str>,
+    run: impl FnOnce() -> T,
+) -> T {
+    struct Restore(Option<Option<GitHubCredentials>>);
     impl Drop for Restore {
         fn drop(&mut self) {
-            TEST_GITHUB_TOKEN.with(|v| *v.borrow_mut() = self.0.take());
+            TEST_GITHUB_CREDENTIALS.with(|v| *v.borrow_mut() = self.0.take());
         }
     }
-    let _restore = Restore(TEST_GITHUB_TOKEN.with(|v| v.replace(Some(token.map(str::to_owned)))));
+    let _restore = Restore(
+        TEST_GITHUB_CREDENTIALS
+            .with(|v| v.replace(Some(GitHubCredentials::from_settings(token, expires_at)))),
+    );
     run()
 }
 

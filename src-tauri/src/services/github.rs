@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn github_api_requests_capture_current_token_for_all_endpoint_shapes() {
-        crate::config::with_test_github_token(None, || {
+        crate::config::with_test_github_credentials(None, None, || {
             let client = reqwest::Client::new();
             for path in [
                 "/repos/o/r/git/trees/HEAD?recursive=1",
@@ -214,19 +214,45 @@ mod tests {
                     .unwrap()
                     .headers()
                     .contains_key("authorization"));
-                crate::config::set_github_token(Some("  saved-token  "));
+                crate::config::set_github_credentials(Some("  saved-token  "), None);
                 let request = super::github_get(&client, &url).build().unwrap();
                 assert_eq!(request.headers()["authorization"], "Bearer saved-token");
-                crate::config::set_github_token(None);
+                crate::config::set_github_credentials(None, None);
             }
             // The shared client must not authenticate unrelated downloads.
-            crate::config::set_github_token(Some("saved-token"));
+            crate::config::set_github_credentials(Some("saved-token"), None);
             assert!(!client
                 .get("https://github.com/o/r/archive/HEAD.zip")
                 .build()
                 .unwrap()
                 .headers()
                 .contains_key("authorization"));
+        });
+    }
+
+    #[test]
+    fn expired_saved_token_falls_back_to_anonymous_requests() {
+        crate::config::with_test_github_credentials(None, None, || {
+            let client = reqwest::Client::new();
+            let url = "https://api.github.com/repos/o/r";
+            let authorization = |client: &reqwest::Client| {
+                super::github_get(client, url)
+                    .build()
+                    .unwrap()
+                    .headers()
+                    .contains_key("authorization")
+            };
+            let future = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+            crate::config::set_github_credentials(Some("saved-token"), Some(&future));
+            assert!(authorization(&client));
+            let past = (chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339();
+            crate::config::set_github_credentials(Some("saved-token"), Some(&past));
+            assert!(!authorization(&client));
+            // Unknown or unreadable expiry keeps failing loudly with the token attached.
+            crate::config::set_github_credentials(Some("saved-token"), None);
+            assert!(authorization(&client));
+            crate::config::set_github_credentials(Some("saved-token"), Some("not a date"));
+            assert!(authorization(&client));
         });
     }
 

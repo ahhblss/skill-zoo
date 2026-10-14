@@ -46,10 +46,9 @@ export function useSaveGitHubToken() {
         if (!verification.authenticated) throw new Error("githubTokenVerificationFailed");
       }
       try {
-        await settingsApi.updateSetting("github_token", token);
-        await settingsApi.updateSetting(
-          "github_token_expires_at",
-          (token && verification?.expiresAt) || "",
+        await settingsApi.saveGitHubCredentials(
+          token,
+          token ? (verification?.expiresAt ?? null) : null,
         );
       } catch {
         throw new Error("githubTokenSaveFailed");

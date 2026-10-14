@@ -41,9 +41,9 @@ describe("GitHubTokenSettings", () => {
       if (command === "verify_github_token") {
         return Promise.resolve({ authenticated: true, limit: 5000 });
       }
-      if (command === "update_setting") {
-        const { key, value } = (args ?? {}) as { key?: string; value?: string };
-        if (key === "github_token") saved = value ?? "";
+      if (command === "save_github_credentials") {
+        const { token } = (args ?? {}) as { token?: string };
+        saved = token ?? "";
         return Promise.resolve();
       }
       return Promise.reject(new Error(`Unexpected command: ${command}`));
@@ -67,13 +67,13 @@ describe("GitHubTokenSettings", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     await screen.findAllByText("Active · quota: 5000 requests/hour");
     expect(invoke).toHaveBeenCalledWith("verify_github_token", { token: "candidate-token" });
-    expect(invoke).toHaveBeenCalledWith("update_setting", {
-      key: "github_token",
-      value: "candidate-token",
+    expect(invoke).toHaveBeenCalledWith("save_github_credentials", {
+      token: "candidate-token",
+      expiresAt: null,
     });
     const commands = vi.mocked(invoke).mock.calls.map(([command]) => command);
     expect(commands.indexOf("verify_github_token")).toBeLessThan(
-      commands.indexOf("update_setting"),
+      commands.indexOf("save_github_credentials"),
     );
     expect(input).toHaveValue("candidate-token");
     await user.type(input, "-edited");
@@ -95,9 +95,9 @@ describe("GitHubTokenSettings", () => {
       await user.type(input, "invalid-token");
       await user.click(screen.getByRole("button", { name: /^save$/i }));
       await screen.findByText(/Verification failed/);
-      expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "update_setting")).toBe(
-        false,
-      );
+      expect(
+        vi.mocked(invoke).mock.calls.some(([command]) => command === "save_github_credentials"),
+      ).toBe(false);
       expect(saved).toBe("previous-token");
       expect(input).toHaveValue("invalid-token");
     },
@@ -120,9 +120,9 @@ describe("GitHubTokenSettings", () => {
     await user.click(button);
     await screen.findByText("Verifying and saving…");
     expect(button).toBeDisabled();
-    expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "update_setting")).toBe(
-      false,
-    );
+    expect(
+      vi.mocked(invoke).mock.calls.some(([command]) => command === "save_github_credentials"),
+    ).toBe(false);
     await act(async () => finish({ authenticated: false, limit: 0 }));
     await waitFor(() => expect(button).toBeEnabled());
   });
@@ -139,9 +139,9 @@ describe("GitHubTokenSettings", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     await screen.findByText(/Verification failed/);
     expect(screen.queryByText(/raw candidate-token error/)).not.toBeInTheDocument();
-    expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "update_setting")).toBe(
-      false,
-    );
+    expect(
+      vi.mocked(invoke).mock.calls.some(([command]) => command === "save_github_credentials"),
+    ).toBe(false);
   });
 
   it("does not report active when persistence fails after verification", async () => {
@@ -172,7 +172,10 @@ describe("GitHubTokenSettings", () => {
     await user.type(input, "   ");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     await screen.findAllByText("Not configured · anonymous quota: 60 requests/hour");
-    expect(invoke).toHaveBeenCalledWith("update_setting", { key: "github_token", value: "" });
+    expect(invoke).toHaveBeenCalledWith("save_github_credentials", {
+      token: "",
+      expiresAt: null,
+    });
     expect(
       vi.mocked(invoke).mock.calls.some(([command]) => command === "verify_github_token"),
     ).toBe(false);
@@ -190,9 +193,9 @@ describe("GitHubTokenSettings", () => {
           expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
         });
       }
-      if (command === "update_setting") {
-        const { key, value } = (args ?? {}) as { key?: string; value?: string };
-        if (key === "github_token") saved = value ?? "";
+      if (command === "save_github_credentials") {
+        const { token } = (args ?? {}) as { token?: string };
+        saved = token ?? "";
         return Promise.resolve();
       }
       return Promise.reject(new Error(`Unexpected command: ${command}`));
@@ -202,9 +205,9 @@ describe("GitHubTokenSettings", () => {
     await user.type(screen.getByLabelText("Personal access token"), "candidate-token");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     await screen.findAllByText(/Active · quota: 5000 requests\/hour · expires /);
-    expect(invoke).toHaveBeenCalledWith("update_setting", {
-      key: "github_token_expires_at",
-      value: expect.any(String),
+    expect(invoke).toHaveBeenCalledWith("save_github_credentials", {
+      token: "candidate-token",
+      expiresAt: expect.any(String),
     });
   });
 
@@ -219,7 +222,7 @@ describe("GitHubTokenSettings", () => {
           expiresAt: new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString(),
         });
       }
-      if (command === "update_setting") return Promise.resolve();
+      if (command === "save_github_credentials") return Promise.resolve();
       return Promise.reject(new Error(`Unexpected command: ${command}`));
     });
     renderSettings();

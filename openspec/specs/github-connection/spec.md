@@ -8,7 +8,7 @@ Defines desktop authentication for public GitHub API reads, verified token setti
 
 ### Requirement: Verified token settings
 
-The desktop SHALL accept a trimmed personal access token, verify it against GitHub's rate-limit endpoint before saving, and display the authenticated hourly core quota. Invalid credentials, network errors, unexpected responses, and persistence failures SHALL NOT replace an existing saved token or its runtime authentication.
+The desktop SHALL accept a trimmed personal access token, verify it against GitHub's rate-limit endpoint before saving, and display the authenticated hourly core quota. Invalid credentials, network errors, unexpected responses, and persistence failures SHALL NOT replace an existing saved token, its persisted expiry, or its runtime authentication. A successful save SHALL persist the token and its expiry in a single settings write.
 
 #### Scenario: Valid token saved
 - **WHEN** the rate-limit endpoint returns HTTP 200 with core limit 5000 for the submitted token
@@ -25,15 +25,19 @@ The desktop SHALL accept a trimmed personal access token, verify it against GitH
 
 ### Requirement: Token removal and startup
 
-A saved token SHALL supply desktop GitHub authentication at startup. Saving an empty or whitespace-only input SHALL remove the token without network verification and restore anonymous requests. A saved token SHALL NOT be presented as freshly verified merely because it exists on disk.
+A saved token SHALL supply desktop GitHub authentication at startup while its recorded expiry has not passed. Saving an empty or whitespace-only input SHALL remove the token and its expiry without network verification and restore anonymous requests. A saved token SHALL NOT be presented as freshly verified merely because it exists on disk.
 
 #### Scenario: Remove token offline
 - **WHEN** the user clears the input and saves while offline
-- **THEN** the token is removed from settings and new requests omit Authorization
+- **THEN** the token and its expiry are removed from settings and new requests omit Authorization
 
 #### Scenario: Restart with configured token
 - **WHEN** the desktop starts with a saved token
 - **THEN** GitHub API reads use it and the settings section distinguishes configured from freshly verified status
+
+#### Scenario: Failed credential save
+- **WHEN** persisting a token and its expiry fails
+- **THEN** persisted settings and runtime authentication both remain unchanged
 
 ### Requirement: Authentication covers public API reads
 
@@ -74,3 +78,19 @@ The English and Chinese settings UI SHALL provide a masked, labeled token input,
 #### Scenario: Recover from update rate limiting
 - **WHEN** the user selects Configure GitHub Token beside a rate-limited update item
 - **THEN** the update manager closes and the token settings input becomes reachable and focused
+
+### Requirement: Expired token falls back to anonymous quota
+
+A saved token whose recorded expiry has passed SHALL NOT be attached to GitHub API reads; requests SHALL use the anonymous quota while the settings row continues to display the expired state. Tokens with no recorded expiry or an unparseable expiry value SHALL remain attached so invalid credentials still fail loudly.
+
+#### Scenario: Recorded expiry has passed
+- **WHEN** a saved token's recorded expiry is in the past
+- **THEN** GitHub API reads omit the Authorization header and the settings row shows the token as expired
+
+#### Scenario: Expiry in the future
+- **WHEN** a saved token's recorded expiry is in the future
+- **THEN** GitHub API reads attach it
+
+#### Scenario: Expiry unknown or unreadable
+- **WHEN** a saved token has no expiry or an unparseable expiry value
+- **THEN** GitHub API reads still attach it
