@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.54] — 2026-10-15
+
+### Added
+- GitHub API access tokens can now be configured in Settings → GitHub Connection. A fine-grained public-repo token (no permissions required) is verified against GitHub's rate-limit endpoint before saving and raises the API quota from the anonymous 60 requests/hour to 5,000, so checking updates across many repositories no longer stops at the anonymous limit. Rate-limited update items now open the token dialog directly from the update manager, and the connection row shows the token's expiry, turning amber within seven days of expiring. (#7)
+- Skill updates now continue in the background after the update manager is closed with X, Escape or an outside click, and a completion summary appears when they finish. While updates are running, closing the window or quitting from the tray asks for confirmation first; restarting for an app update and macOS Cmd+Q/Dock quit remain unguarded, a platform limitation of the current window library.
+
+### Changed
+- The GitHub connection row now derives its status line from live state — anonymous quota, token configured, freshly verified quota, or expired — instead of showing a static description.
+
+### Fixed
+- An expired saved token no longer breaks GitHub reads with misleading "Repository or branch could not be found" failures: requests fall back to the anonymous quota until the token is replaced, matching what the connection row already said. Tokens without a recorded expiry are still sent, so revoked credentials keep failing loudly. Token and expiry now persist in a single write, so a failed save leaves the previous credentials untouched.
+- Writing while another operation holds the local lease — for example removing a skill while updates run — now returns a friendly "try again when it finishes" message in both languages instead of a raw internal error.
+
 ## [0.3.53] — 2026-10-14
 
 ### Added
