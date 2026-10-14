@@ -41,6 +41,7 @@ import {
   useUnstarSkill,
   useSkillsWatcher,
 } from "@/hooks/useSkills";
+import { useBackgroundSkillUpdates } from "@/hooks/useBackgroundSkillUpdates";
 import { applyTheme, subscribeToSystemTheme } from "@/hooks/useTheme";
 import { settingsApi } from "@/lib/api/settings";
 import type { View, DiscoverRepo, SidebarCategory } from "@/types/skills";
@@ -127,6 +128,7 @@ export default function App() {
   } = useArchivedSkillContent(archivedEditor?.archiveId ?? null);
   const [category, setCategory] = useState<SidebarCategory>({ type: "all" });
   useSkillsWatcher();
+  useBackgroundSkillUpdates();
 
   useEffect(() => {
     const theme = (localStorage.getItem("theme") as string | null) ?? "system";

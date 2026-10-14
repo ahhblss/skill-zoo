@@ -207,6 +207,15 @@ pub fn setup_tray(app: &mut App) -> tauri::Result<()> {
     Ok(())
 }
 
+pub fn current_language_code(app: &AppHandle) -> &'static str {
+    app.try_state::<TrayState>()
+        .map(|state| match *state.language.lock().unwrap() {
+            TrayLanguage::Zh => "zh",
+            TrayLanguage::En => "en",
+        })
+        .unwrap_or("en")
+}
+
 pub fn set_tray_language(app: &AppHandle, language: &str) -> Result<(), String> {
     let Some(tray_state) = app.try_state::<TrayState>() else {
         return Ok(());

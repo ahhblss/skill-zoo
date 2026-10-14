@@ -189,6 +189,7 @@ pub fn run() {
             commands::settings::check_skill_updates,
             commands::settings::is_portable_build,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(services::update_exit::handle_run_event);
 }

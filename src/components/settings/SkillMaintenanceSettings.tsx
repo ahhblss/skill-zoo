@@ -14,7 +14,6 @@ import { useUpdateAllSkills, useInstalledSkills } from "@/hooks/useSkills";
 import { useHideNonSsot, useUpdateHideNonSsot } from "@/hooks/useSettings";
 import { useMutation } from "@tanstack/react-query";
 import { useIsMutationPending } from "@/hooks/usePendingMutation";
-import { formatApiError } from "@/lib/api/errors";
 import { skillsApi, type CheckUpdatesResult } from "@/lib/api/skills";
 import { cn } from "@/lib/utils";
 
@@ -142,34 +141,11 @@ export function SkillMaintenanceSettings() {
           latestSha: update.latestSha,
         })),
         {
-          onSuccess: (result) => {
-            checkMutation.reset();
-            if (result.successCount > 0 && result.failCount === 0) {
-              toast.success(
-                t("settings.maintenance.updateAllSuccess", {
-                  count: result.successCount,
-                }),
-              );
-            } else if (result.failCount > 0) {
-              const failure = result.errors[0]
-                ? formatApiError(result.errors[0])
-                : t("settings.maintenance.updateAllFailed");
-              toast.warning(
-                result.successCount > 0
-                  ? `${t("settings.maintenance.updateAllPartial", {
-                      success: result.successCount,
-                      fail: result.failCount,
-                    })}: ${failure}`
-                  : failure,
-              );
-            } else {
-              toast.error(t("settings.maintenance.updateAllFailed"));
-            }
-          },
+          onSuccess: () => checkMutation.reset(),
         },
       );
     },
-    [checkMutation, t, updateAllMutation],
+    [checkMutation, updateAllMutation],
   );
 
   return (

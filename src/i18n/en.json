@@ -153,7 +153,8 @@
     "repoNotFound": "Repository not found. It may be private or the link is incorrect.",
     "rateLimit": "GitHub requests are temporarily rate limited. Please try again later.",
     "repoTooLarge": "Repository exceeds the size limit and cannot be loaded.",
-    "generic": "Could not complete the operation. Please try again."
+    "generic": "Could not complete the operation. Please try again.",
+    "operationInProgress": "An update or another write operation is in progress. Please try again later."
   },
   "configureDialog": {
     "title": "Coding Agent Configuration",
@@ -368,7 +369,8 @@
       "clearCacheBtn": "Clear Cache",
       "clearing": "Clearing…",
       "clearCacheFailed": "Could not clear download cache",
-      "openCacheDir": "Cache folder"
+      "openCacheDir": "Cache folder",
+      "updateAllFailureSummary": "Update failed: {{success}} updated, {{fail}} failed"
     },
     "localImports": {
       "cardTitle": "Local Imports",
@@ -548,5 +550,11 @@
     "lastActive": "Last active:",
     "lastPush": "Last push:",
     "viewOnGitHub": "View on GitHub"
+  },
+  "updateExitDialog": {
+    "title": "Quit Skill Zoo?",
+    "message": "Skill updates are in progress. Are you sure you want to quit?",
+    "quit": "Quit",
+    "cancel": "Keep updating"
   }
 }

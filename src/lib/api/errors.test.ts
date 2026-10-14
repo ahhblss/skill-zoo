@@ -1,8 +1,23 @@
 import "@/i18n";
 import { describe, expect, it } from "vitest";
 import { formatApiError } from "@/lib/api/errors";
+import i18n from "@/i18n";
 
 describe("formatApiError", () => {
+  it("localizes lease conflicts in both structured and string command errors", async () => {
+    const error = { code: "operationInProgress", message: "raw lease detail", repo: null };
+    expect(formatApiError(error)).toBe(
+      "An update or another write operation is in progress. Please try again later.",
+    );
+    await i18n.changeLanguage("zh");
+    try {
+      expect(formatApiError(JSON.stringify(error))).toBe(
+        "有更新或其他写入任务正在进行，请稍后重试。",
+      );
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
   it("formats structured download errors with the repository name", () => {
     expect(
       formatApiError({

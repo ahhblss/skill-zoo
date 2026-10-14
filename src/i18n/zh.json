@@ -153,7 +153,8 @@
     "repoNotFound": "仓库未找到，可能是私有仓库或链接不正确。",
     "rateLimit": "GitHub 请求已被暂时限流，请稍后再试。",
     "repoTooLarge": "仓库体积超过限制，无法加载。",
-    "generic": "操作无法完成，请重试。"
+    "generic": "操作无法完成，请重试。",
+    "operationInProgress": "有更新或其他写入任务正在进行，请稍后重试。"
   },
   "configureDialog": {
     "title": "编程工具配置",
@@ -368,7 +369,8 @@
       "clearCacheBtn": "清除缓存",
       "clearing": "清除中…",
       "clearCacheFailed": "清除下载缓存失败",
-      "openCacheDir": "缓存目录"
+      "openCacheDir": "缓存目录",
+      "updateAllFailureSummary": "更新失败：{{success}} 成功，{{fail}} 失败"
     },
     "localImports": {
       "cardTitle": "本地导入技能",
@@ -548,5 +550,11 @@
     "lastActive": "最近活跃：",
     "lastPush": "最近推送：",
     "viewOnGitHub": "在 GitHub 查看"
+  },
+  "updateExitDialog": {
+    "title": "退出 Skill Zoo？",
+    "message": "更新正在进行，确定退出？",
+    "quit": "退出",
+    "cancel": "继续更新"
   }
 }

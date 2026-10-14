@@ -7,6 +7,7 @@ interface ApiError {
 }
 
 const ERROR_KEYS: Record<string, string> = {
+  operationInProgress: "error.operationInProgress",
   downloadNetwork: "error.downloadNetwork",
   downloadTimeout: "error.downloadTimeout",
   downloadDns: "error.downloadDns",

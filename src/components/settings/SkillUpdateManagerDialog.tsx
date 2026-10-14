@@ -101,7 +101,6 @@ export function SkillUpdateManagerDialog({
   const clearHistory = useClearSkillUpdateHistory();
   const history = historyQuery.data ?? [];
   const historyBusy = deleteHistory.isPending || clearHistory.isPending;
-  const busy = isUpdating || historyBusy;
 
   useEffect(() => {
     if (!open) return;
@@ -139,11 +138,8 @@ export function SkillUpdateManagerDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        closeDisabled={busy}
-        onPointerDownOutside={(event) => busy && event.preventDefault()}
-        onEscapeKeyDown={(event) => busy && event.preventDefault()}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           if (configureGitHubTokenRef.current) {
@@ -315,7 +311,7 @@ export function SkillUpdateManagerDialog({
                                 size="sm"
                                 variant="link"
                                 className="h-auto p-0 text-xs"
-                                disabled={busy}
+                                disabled={isUpdating || historyBusy}
                                 onClick={() => {
                                   configureGitHubTokenRef.current = true;
                                   onOpenChange(false);

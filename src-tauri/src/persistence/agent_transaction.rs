@@ -59,22 +59,23 @@ fn try_bind_lease_port(dir: &Path, port: u16) -> Result<std::net::TcpListener, A
             .set_reuse_address(true)
             .map_err(|e| error::io(dir, e))?;
         socket
-            .bind(
-                &std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)).into(),
-            )
-            .map_err(|_| {
-                AppError::BadRequest("Another agent operation is running or the local lease is unavailable. Try again when it finishes.".into())
-            })?;
+            .bind(&std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)).into())
+            .map_err(|e| lease_bind_error(dir, e))?;
         socket.listen(1).map_err(|e| error::io(dir, e))?;
         Ok(std::net::TcpListener::from(socket))
     }
     #[cfg(not(unix))]
     {
-        let _ = dir;
         std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
-            .map_err(|_| {
-                AppError::BadRequest("Another agent operation is running or the local lease is unavailable. Try again when it finishes.".into())
-            })
+            .map_err(|e| lease_bind_error(dir, e))
+    }
+}
+
+fn lease_bind_error(dir: &Path, error: std::io::Error) -> AppError {
+    if error.kind() == std::io::ErrorKind::AddrInUse {
+        AppError::OperationInProgress
+    } else {
+        error::io(dir, error)
     }
 }
 
@@ -94,7 +95,7 @@ fn bind_lease_port(dir: &Path, port: u16) -> Result<std::net::TcpListener, AppEr
         }
         match try_bind_lease_port(dir, port) {
             Ok(listener) => return Ok(listener),
-            Err(e @ AppError::BadRequest(_)) => conflict = Some(e),
+            Err(e @ AppError::OperationInProgress) => conflict = Some(e),
             Err(e) => return Err(e),
         }
     }
@@ -303,9 +304,31 @@ mod tests {
     fn live_lease_is_exclusive_and_released() {
         let tmp = tempfile::tempdir().unwrap();
         let lease = AgentLease::acquire(tmp.path()).unwrap();
-        assert!(AgentLease::acquire(tmp.path()).is_err());
+        let error = AgentLease::acquire(tmp.path()).err().unwrap();
+        let error = crate::error::CommandError::from(error);
+        assert_eq!(error.code, "operationInProgress");
+        assert_eq!(error.repo, None);
         drop(lease);
         assert!(AgentLease::acquire(tmp.path()).is_ok());
+    }
+
+    #[test]
+    fn lease_bind_errors_only_classify_address_in_use_as_busy() {
+        use crate::error::CommandError;
+        use std::io::{Error, ErrorKind};
+        let dir = Path::new("/test/config");
+        assert_eq!(
+            CommandError::from(lease_bind_error(dir, Error::from(ErrorKind::AddrInUse))).code,
+            "operationInProgress"
+        );
+        assert_eq!(
+            CommandError::from(lease_bind_error(
+                dir,
+                Error::from(ErrorKind::PermissionDenied)
+            ))
+            .code,
+            "permissionDenied"
+        );
     }
 
     #[test]

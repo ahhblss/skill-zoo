@@ -802,6 +802,10 @@ fn rollback_installed_skills(
     errors
 }
 
+fn lease_command_error(error: AppError) -> String {
+    serde_json::to_string(&CommandError::from(error)).expect("CommandError is serializable")
+}
+
 fn command_error_with_recovery(error: AppError, recovery_errors: Vec<String>) -> CommandError {
     let mut command_error = CommandError::from(error);
     if !recovery_errors.is_empty() {
@@ -1051,9 +1055,10 @@ pub async fn update_all_skills(
     state: State<'_, AppState>,
     checked_updates: Option<Vec<CheckedSkillUpdate>>,
 ) -> Result<UpdateAllResult, String> {
+    let _update_guard = state.update_exit.start_update();
     let _agent_lease =
         crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+            .map_err(lease_command_error)?;
     let started_at = chrono::Utc::now().to_rfc3339();
     let (mode, requested_skills, update_result) = if let Some(checked_updates) = checked_updates {
         let requested_skills: Vec<String> = checked_updates
@@ -1451,7 +1456,7 @@ pub async fn remove_skills(
 ) -> Result<RemoveSkillsResult, String> {
     let _agent_lease =
         crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+            .map_err(lease_command_error)?;
     let mut removed: Vec<String> = Vec::new();
     let mut failed: Vec<RemoveSkillFailure> = Vec::new();
 
@@ -3510,6 +3515,19 @@ mod tests {
         assert_eq!(error.code, "binaryFile");
         assert_eq!(error.message, "File is not UTF-8 text");
         assert_eq!(error.repo, None);
+    }
+
+    #[test]
+    fn lease_command_error_uses_stable_code_in_string_commands() {
+        let error: serde_json::Value =
+            serde_json::from_str(&lease_command_error(AppError::OperationInProgress)).unwrap();
+        assert_eq!(error["code"], "operationInProgress");
+        assert!(error["repo"].is_null());
+        // Install uses the structured CommandError directly.
+        assert_eq!(
+            CommandError::from(AppError::OperationInProgress).code,
+            "operationInProgress"
+        );
     }
 
     #[test]

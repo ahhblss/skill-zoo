@@ -1,12 +1,13 @@
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { SkillMaintenanceSettings } from "./SkillMaintenanceSettings";
+import { useBackgroundSkillUpdates } from "@/hooks/useBackgroundSkillUpdates";
 import { GitHubTokenSettings } from "./GitHubTokenSettings";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -19,6 +20,11 @@ vi.mock("sonner", () => ({
   },
 }));
 
+function BackgroundUpdates() {
+  useBackgroundSkillUpdates();
+  return null;
+}
+
 function renderSettings(withGitHubConnection = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -29,6 +35,7 @@ function renderSettings(withGitHubConnection = false) {
 
   return render(
     <QueryClientProvider client={queryClient}>
+      <BackgroundUpdates />
       <SkillMaintenanceSettings />
       {withGitHubConnection && <GitHubTokenSettings />}
     </QueryClientProvider>,
@@ -57,6 +64,82 @@ describe("SkillMaintenanceSettings", () => {
           return Promise.reject(new Error(`Unexpected command: ${command}`));
       }
     });
+  });
+
+  it("keeps an update running after close and refreshes history when reopened", async () => {
+    const user = userEvent.setup();
+    let finish!: (result: unknown) => void;
+    let finished = false;
+    vi.mocked(invoke).mockImplementation((command) => {
+      switch (command) {
+        case "get_installed_skills":
+          return Promise.resolve([{ id: "skill:demo", directory: "demo", origin: "ssot" }]);
+        case "get_settings":
+          return Promise.resolve({});
+        case "get_cache_size":
+          return Promise.resolve(0);
+        case "check_skill_updates":
+          return Promise.resolve({
+            skills: [
+              {
+                skillName: "demo",
+                hasUpdate: true,
+                currentSha: "old",
+                latestSha: "new",
+                repo: "owner/repo",
+              },
+            ],
+            totalRepos: 1,
+            checkedRepos: 1,
+            rateLimited: false,
+          });
+        case "get_skill_update_history":
+          return Promise.resolve(
+            finished
+              ? [
+                  {
+                    id: "done",
+                    startedAt: "2026-01-01T00:00:00Z",
+                    finishedAt: "2026-01-01T00:01:00Z",
+                    mode: "selected",
+                    requestedSkills: ["demo"],
+                    updatedSkills: ["demo"],
+                    failedSkills: [],
+                    errors: [],
+                    status: "success",
+                  },
+                ]
+              : [],
+          );
+        case "update_all_skills":
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        default:
+          return Promise.reject(new Error(`Unexpected command: ${command}`));
+      }
+    });
+    vi.mocked(toast.success).mockClear();
+    renderSettings();
+    await user.click(await screen.findByRole("button", { name: /check updates/i }));
+    await user.click(await screen.findByRole("button", { name: /update manager/i }));
+    await user.click(screen.getByRole("button", { name: /^update selected$/i }));
+    await waitFor(() => expect(finish).toBeDefined());
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(toast.success).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /update manager/i }));
+    expect(screen.getByRole("button", { name: /^update selected$/i })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    finished = true;
+    act(() => finish({ skills: [], successCount: 1, failCount: 0, errors: [] }));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledExactlyOnceWith("1 skill(s) updated successfully"),
+    );
+    await user.click(screen.getByRole("button", { name: /update manager/i }));
+    await screen.findByText(/No checked updates are available/);
+    await user.click(screen.getByRole("button", { name: /history/i }));
+    await screen.findByText("1 updated, 0 failed");
   });
 
   it("takes rate-limited update items to the GitHub token input on dialog close", async () => {
@@ -173,8 +256,8 @@ describe("SkillMaintenanceSettings", () => {
     await user.click(await screen.findByRole("button", { name: /^update selected$/i }));
 
     await waitFor(() =>
-      expect(toast.warning).toHaveBeenCalledWith(
-        "GitHub requests are temporarily rate limited. Please try again later.",
+      expect(toast.error).toHaveBeenCalledWith(
+        "Update failed: 0 updated, 1 failed: GitHub requests are temporarily rate limited. Please try again later.",
       ),
     );
   });
@@ -227,8 +310,8 @@ describe("SkillMaintenanceSettings", () => {
     await user.click(await screen.findByRole("button", { name: /^update selected$/i }));
 
     await waitFor(() =>
-      expect(toast.warning).toHaveBeenCalledWith(
-        "vercel-labs/agent-browser is temporarily unavailable. Please try again later.",
+      expect(toast.error).toHaveBeenCalledWith(
+        "Update failed: 0 updated, 1 failed: vercel-labs/agent-browser is temporarily unavailable. Please try again later.",
       ),
     );
   });

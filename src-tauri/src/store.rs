@@ -2,6 +2,7 @@ use crate::persistence::{MetadataStore, Settings, SkillCache};
 use std::sync::RwLock;
 
 pub struct AppState {
+    pub update_exit: crate::services::update_exit::UpdateExitState,
     pub skill_cache: RwLock<SkillCache>,
     pub metadata: RwLock<MetadataStore>,
     pub settings: std::sync::Mutex<Settings>,
@@ -13,6 +14,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(skill_cache: SkillCache, metadata: MetadataStore, settings: Settings) -> Self {
         Self {
+            update_exit: Default::default(),
             skill_cache: RwLock::new(skill_cache),
             metadata: RwLock::new(metadata),
             settings: std::sync::Mutex::new(settings),

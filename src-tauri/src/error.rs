@@ -2,6 +2,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AppError {
+    #[error("Another update or write operation is in progress. Try again when it finishes.")]
+    OperationInProgress,
+
     #[error("CLI error: {0}")]
     Cli(String),
 
@@ -116,6 +119,7 @@ impl CommandError {
 impl AppError {
     fn code(&self) -> &'static str {
         match self {
+            AppError::OperationInProgress => "operationInProgress",
             AppError::DownloadNetwork { .. } | AppError::Network(_) => "downloadNetwork",
             AppError::DownloadTimeout { .. } => "downloadTimeout",
             AppError::DownloadDns { .. } => "downloadDns",
