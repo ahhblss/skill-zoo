@@ -481,7 +481,7 @@ export const SkillContentPane = memo(function SkillContentPane({
             <button
               onClick={isSkillMdActive ? onSave : handleFileSave}
               disabled={isSkillMdActive ? (savePending ?? false) : saveFileMutation.isPending}
-              className="ml-auto px-2.5 py-1 h-6 text-[11px] rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              className="press-feedback ml-auto px-2.5 py-1 h-6 text-[11px] rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {(isSkillMdActive ? savePending : saveFileMutation.isPending)
                 ? "…"
@@ -512,7 +512,7 @@ export const SkillContentPane = memo(function SkillContentPane({
             keeps up with the pointer. */}
         <div
           className={cn(
-            "h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out",
+            "h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none",
             sidebarDragging && "!duration-0",
           )}
           style={{
@@ -521,7 +521,7 @@ export const SkillContentPane = memo(function SkillContentPane({
         >
           <div
             className={cn(
-              "h-full transition-[translate,opacity] duration-200 ease-out",
+              "h-full transition-[translate,opacity] duration-200 ease-out motion-reduce:transition-none",
               sidebarOpen ? "translate-x-0 opacity-100" : "-translate-x-full opacity-0",
             )}
             style={{
@@ -589,7 +589,7 @@ export const SkillContentPane = memo(function SkillContentPane({
           >
             {/* Left pane — editor (visible in edit & split) */}
             <div
-              className="h-full min-w-0 overflow-hidden transition-[width] duration-300 ease-in-out"
+              className="h-full min-w-0 overflow-hidden transition-[width] duration-300 ease-in-out motion-reduce:transition-none"
               style={{
                 width:
                   effectiveActiveTab === "overview"
@@ -633,7 +633,7 @@ export const SkillContentPane = memo(function SkillContentPane({
 
             {/* Right pane — preview (visible in view & split) */}
             <div
-              className="h-full min-w-0 overflow-hidden transition-[width] duration-300 ease-in-out"
+              className="h-full min-w-0 overflow-hidden transition-[width] duration-300 ease-in-out motion-reduce:transition-none"
               style={{
                 width:
                   effectiveActiveTab === "overview"

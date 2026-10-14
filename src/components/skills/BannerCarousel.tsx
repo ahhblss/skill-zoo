@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { resolveResource } from "@tauri-apps/api/path";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 import type { Banner } from "@/types/skills";
 
 const ASPECT = 250 / 420;
@@ -61,6 +62,7 @@ interface BannerCarouselProps {
 }
 
 export function BannerCarousel({ banners, onBannerClick }: BannerCarouselProps) {
+  const reduceMotion = useReducedMotion();
   const [current, setCurrent] = useState(0);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [isHovered, setIsHovered] = useState(false);
@@ -112,12 +114,12 @@ export function BannerCarousel({ banners, onBannerClick }: BannerCarouselProps) 
 
   // Auto-play
   useEffect(() => {
-    if (banners.length <= 1 || isHovered) return;
+    if (banners.length <= 1 || isHovered || reduceMotion) return;
     const timer = setInterval(() => {
       setCurrent((prev) => (prev + 1) % banners.length);
     }, 8000);
     return () => clearInterval(timer);
-  }, [banners.length, isHovered]);
+  }, [banners.length, isHovered, reduceMotion]);
 
   const goTo = useCallback((index: number) => {
     setCurrent(index);
@@ -177,8 +179,9 @@ export function BannerCarousel({ banners, onBannerClick }: BannerCarouselProps) 
               zIndex: style.zIndex,
               opacity: style.opacity,
               boxShadow: style.shadow,
-              transition:
-                "transform 0.7s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.7s ease, box-shadow 0.7s ease",
+              transition: reduceMotion
+                ? "none"
+                : "transform 0.7s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.7s ease, box-shadow 0.7s ease",
               transformStyle: "preserve-3d",
             }}
             onClick={() => {
@@ -233,7 +236,7 @@ export function BannerCarousel({ banners, onBannerClick }: BannerCarouselProps) 
             <button
               key={i}
               onClick={() => goTo(i)}
-              className={`h-1.5 rounded-full transition-all duration-300 ${
+              className={`h-1.5 rounded-full transition-all duration-300 motion-reduce:transition-none ${
                 i === current ? "w-5 bg-white" : "w-1.5 bg-white/50 hover:bg-white/70"
               }`}
               aria-label={`Go to banner ${i + 1}`}

@@ -85,7 +85,7 @@ function SkillInfoPopover({ skill }: { skill: InstalledSkill }) {
         <div
           onMouseEnter={onEnter}
           onMouseLeave={onLeave}
-          className="absolute right-0 top-8 z-50 w-64 rounded-lg border border-border bg-popover shadow-lg px-3 py-2.5 text-xs space-y-1.5"
+          className="popover-enter absolute right-0 top-8 z-50 w-64 rounded-lg border border-border bg-popover shadow-lg px-3 py-2.5 text-xs space-y-1.5"
         >
           {/* Repository */}
           {skill.repoOwner && skill.repoName && (

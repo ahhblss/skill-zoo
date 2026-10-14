@@ -287,7 +287,7 @@ export function SkillSidebar({
                 silently clipped long repo lists. */}
             <div
               className={cn(
-                "grid transition-[grid-template-rows] duration-200 ease-in-out",
+                "grid transition-[grid-template-rows] duration-200 ease-in-out motion-reduce:transition-none",
                 reposExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
               )}
             >

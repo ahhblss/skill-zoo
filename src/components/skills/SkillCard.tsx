@@ -90,7 +90,7 @@ export function SkillCard({
             <Button
               size="sm"
               variant="default"
-              className="h-8 text-xs rounded-lg"
+              className="press-feedback h-8 text-xs rounded-lg"
               onClick={onInstall}
             >
               {t("common.install")}

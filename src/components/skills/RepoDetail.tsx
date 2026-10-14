@@ -30,6 +30,7 @@ import type { DiscoverRepo, DiscoverableSkill } from "@/types/skills";
 import { BackButton } from "@/components/ui/BackButton";
 import { AlertTriangle, Star, GitFork, ExternalLink, Check, RotateCw, Loader } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -44,6 +45,7 @@ interface RepoDetailProps {
 
 export function RepoDetail({ repo, onBack }: RepoDetailProps) {
   const { t } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const {
     data: skills,
     isLoading,
@@ -348,7 +350,7 @@ export function RepoDetail({ repo, onBack }: RepoDetailProps) {
                       <Button
                         size="sm"
                         variant="default"
-                        className="h-7 text-xs rounded-lg shrink-0"
+                        className="press-feedback h-7 text-xs rounded-lg shrink-0"
                         onClick={() => handleInstallSingle(skill)}
                       >
                         {t("common.install")}
@@ -378,7 +380,11 @@ export function RepoDetail({ repo, onBack }: RepoDetailProps) {
           <span className="text-sm text-muted-foreground">
             {t("browse.selectedCount", { count: selectedInstallable.length })}
           </span>
-          <Button size="sm" className="h-7 text-xs rounded-lg" onClick={handleInstallSelected}>
+          <Button
+            size="sm"
+            className="press-feedback h-7 text-xs rounded-lg"
+            onClick={handleInstallSelected}
+          >
             <Check className="h-3.5 w-3.5 mr-1.5" />
             {t("browse.installSelected")}
           </Button>
@@ -440,19 +446,21 @@ export function RepoDetail({ repo, onBack }: RepoDetailProps) {
             {/* Backdrop */}
             <motion.div
               className="absolute inset-0 bg-black/20 z-20"
-              initial={{ opacity: 0 }}
+              initial={reduceMotion ? false : { opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: reduceMotion ? 0 : 0.2 }}
               onClick={() => setPreviewSkill(null)}
             />
             {/* Panel */}
             <motion.div
               className="absolute top-0 right-0 h-full w-[45%] min-w-[400px] max-w-[600px] bg-background border-l border-border shadow-xl z-30 flex flex-col"
-              initial={{ x: "100%" }}
+              initial={reduceMotion ? false : { x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 24, stiffness: 260 }}
+              transition={
+                reduceMotion ? { duration: 0 } : { type: "spring", damping: 24, stiffness: 260 }
+              }
             >
               <ScrollArea className="flex-1 min-h-0">
                 <div className="px-5 py-4">

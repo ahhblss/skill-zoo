@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { motion, AnimatePresence } from "framer-motion";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
@@ -101,6 +102,7 @@ async function handleDragMouseDown(e: React.MouseEvent) {
 
 export default function App() {
   const { i18n, t } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const [view, setView] = useState<View>("local");
   const [skillCompanionOpenRequest, setSkillCompanionOpenRequest] = useState(0);
   const skillCompanionRequestCounter = useRef(0);
@@ -380,10 +382,10 @@ export default function App() {
               <AnimatePresence mode="wait">
                 <motion.div
                   key={showCreateSkill ? "create" : view}
-                  initial={{ opacity: 0 }}
+                  initial={reduceMotion ? false : { opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  transition={{ duration: 0.15 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.15 }}
                   className="h-full"
                 >
                   {renderMain()}

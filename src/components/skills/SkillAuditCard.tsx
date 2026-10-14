@@ -148,7 +148,7 @@ export function SkillAuditCard({ owner, repo, slug, compact, display }: SkillAud
         </button>
         {expanded && (
           <div
-            className="absolute right-0 top-8 z-50 rounded-lg border border-border bg-popover shadow-lg"
+            className="popover-enter absolute right-0 top-8 z-50 rounded-lg border border-border bg-popover shadow-lg"
             style={{ width: "min(20rem, calc(100vw - 2.5rem))" }}
           >
             {auditBody}
@@ -170,13 +170,16 @@ export function SkillAuditCard({ owner, repo, slug, compact, display }: SkillAud
             <ShieldCheck className="h-3.5 w-3.5" />
             {t("audit.title")}
             <ChevronDown
-              className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")}
+              className={cn(
+                "h-3.5 w-3.5 transition-transform motion-reduce:transition-none",
+                expanded && "rotate-180",
+              )}
             />
           </button>
 
           {expanded && (
             <div
-              className="absolute right-0 top-8 z-50 rounded-lg border border-border bg-popover shadow-lg"
+              className="popover-enter absolute right-0 top-8 z-50 rounded-lg border border-border bg-popover shadow-lg"
               style={{ width: "min(20rem, calc(100vw - 2.5rem))" }}
             >
               {auditBody}
