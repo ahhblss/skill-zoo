@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.53] — 2026-10-14
+
+### Added
+- Skill info and audit popovers now animate in with a 140ms fade and a 3px rise, and install and save actions get press feedback. The desktop respects the OS "reduce motion" preference and observes it live: the banner carousel stops autoplaying and animated surfaces render their final state the moment the preference flips on mid-session, while shared Radix menus, dialogs and tooltips degrade via `motion-reduce:animate-none`.
+
+### Fixed
+- SKILL.md files saved with a leading UTF-8 BOM — common in files written by Windows editors — now parse correctly. The BOM is stripped before frontmatter extraction instead of silently breaking it, so a skill's name and description no longer disappear for such files.
+- Downloaded repository archives are now scale-validated before extraction on every path that unpacks them: a decompressed-to-compressed ratio above 4x (with a 1 GiB floor so legitimate media-heavy archives still pass) or more than 100,000 entries is rejected as a decompression bomb. The Discover page previously extracted with only the download-size check, leaving the bomb vector reachable from there; it now applies the same guards as the install pipeline.
+
 ## [0.3.52] — 2026-10-13
 
 ### Fixed
