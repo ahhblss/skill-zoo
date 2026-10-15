@@ -95,10 +95,53 @@ pub fn save_skill_usage_screenshot(data_url: String) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+/// The GitHub credential keys: hidden from the generic read (the UI asks
+/// `get_github_credential_status` instead) and writable only through
+/// `save_github_credentials`, which keeps the runtime slot in sync. One list
+/// backs both the read filter and the write guard.
+const CREDENTIAL_KEYS: &[&str] = &["github_token", "github_token_expires_at"];
+
+fn visible_settings(values: &HashMap<String, String>) -> HashMap<String, String> {
+    values
+        .iter()
+        .filter(|(key, _)| !CREDENTIAL_KEYS.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<HashMap<String, String>, String> {
     let settings = state.settings.lock().map_err(|e| e.to_string())?;
-    Ok(settings.values.clone())
+    Ok(visible_settings(&settings.values))
+}
+
+/// Saved-state view of the credential: existence and recorded expiry, never
+/// the token itself (the write-only contract).
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubCredentialStatus {
+    pub has_token: bool,
+    pub expires_at: Option<String>,
+}
+
+fn credential_status(values: &HashMap<String, String>) -> GitHubCredentialStatus {
+    GitHubCredentialStatus {
+        has_token: values
+            .get("github_token")
+            .is_some_and(|token| !token.trim().is_empty()),
+        expires_at: values
+            .get("github_token_expires_at")
+            .filter(|value| !value.trim().is_empty())
+            .cloned(),
+    }
+}
+
+#[tauri::command]
+pub fn get_github_credential_status(
+    state: State<'_, AppState>,
+) -> Result<GitHubCredentialStatus, String> {
+    let settings = state.settings.lock().map_err(|e| e.to_string())?;
+    Ok(credential_status(&settings.values))
 }
 
 #[tauri::command]
@@ -107,6 +150,9 @@ pub fn update_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
+    if let Some(error) = credential_key_violation(&key) {
+        return Err(error);
+    }
     let _agent_lease = crate::persistence::agent_transaction::AgentLease::acquire(
         &crate::config::get_app_config_dir(),
     )
@@ -114,6 +160,15 @@ pub fn update_setting(
     let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
     settings.set(key, value);
     settings.save().map_err(|e| e.to_string())
+}
+
+/// The credential keys are owned by the credential save command: a generic
+/// write would persist without refreshing the runtime slot, pairing a new
+/// token with a stale expiry. Fail loudly instead of silently bypassing it.
+fn credential_key_violation(key: &str) -> Option<String> {
+    CREDENTIAL_KEYS.contains(&key).then(|| {
+        "GitHub credentials must be changed through the save_github_credentials command".to_string()
+    })
 }
 
 /// Owns the GitHub credential keys: token and expiry persist in one settings
@@ -167,6 +222,31 @@ fn persist_github_credentials(
 pub async fn verify_github_token(
     token: String,
 ) -> Result<crate::services::github::GitHubTokenVerification, String> {
+    crate::services::github::verify_github_token(&token).await
+}
+
+/// Live verification of the *saved* token for the credential dialog. The
+/// token is read here, server-side, and never crosses the bridge — only the
+/// verification result does.
+/// The saved token for live verification, present only when a non-blank token
+/// exists — the same "configured" view `credential_status` reports, so a
+/// whitespace-only legacy value is never sent to GitHub.
+fn verifiable_saved_token(values: &HashMap<String, String>) -> Option<String> {
+    values
+        .get("github_token")
+        .filter(|token| !token.trim().is_empty())
+        .cloned()
+}
+
+#[tauri::command]
+pub async fn verify_saved_github_token(
+    state: State<'_, AppState>,
+) -> Result<crate::services::github::GitHubTokenVerification, String> {
+    let token = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        verifiable_saved_token(&settings.values)
+            .ok_or_else(|| "No saved GitHub token to verify".to_string())?
+    };
     crate::services::github::verify_github_token(&token).await
 }
 
@@ -244,6 +324,82 @@ pub fn get_visible_agents(state: State<'_, AppState>) -> Result<HashMap<String, 
 mod tests {
     use super::decode_png_data_url;
     use base64::Engine;
+    use std::collections::HashMap;
+
+    #[test]
+    fn update_setting_rejects_credential_keys() {
+        for key in ["github_token", "github_token_expires_at"] {
+            let violation = super::credential_key_violation(key);
+            assert!(
+                violation.is_some_and(|e| e.contains("save_github_credentials")),
+                "expected {key} to be rejected naming the save command"
+            );
+        }
+        for key in ["theme", "hide_non_ssot", "github_token_expiry"] {
+            assert!(super::credential_key_violation(key).is_none());
+        }
+    }
+
+    #[test]
+    fn visible_settings_omits_credential_keys_only() {
+        let mut values = HashMap::new();
+        values.insert("github_token".to_string(), "secret".to_string());
+        values.insert(
+            "github_token_expires_at".to_string(),
+            "2026-11-13T00:00:00Z".to_string(),
+        );
+        values.insert("theme".to_string(), "dark".to_string());
+        let visible = super::visible_settings(&values);
+        assert!(visible.get("github_token").is_none());
+        assert!(visible.get("github_token_expires_at").is_none());
+        assert_eq!(visible.get("theme").map(String::as_str), Some("dark"));
+    }
+
+    #[test]
+    fn credential_status_reports_existence_and_expiry_without_token() {
+        let mut values = HashMap::new();
+        assert!(!super::credential_status(&values).has_token);
+        assert!(super::credential_status(&values).expires_at.is_none());
+
+        values.insert("github_token".to_string(), "  ".to_string());
+        assert!(
+            !super::credential_status(&values).has_token,
+            "blank token is no token"
+        );
+
+        values.insert("github_token".to_string(), "secret".to_string());
+        let status = super::credential_status(&values);
+        assert!(status.has_token);
+        assert!(status.expires_at.is_none());
+        // The serialized status carries no token material.
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(!json.contains("secret"));
+
+        values.insert(
+            "github_token_expires_at".to_string(),
+            "2026-11-13T16:14:49+00:00".to_string(),
+        );
+        assert_eq!(
+            super::credential_status(&values).expires_at.as_deref(),
+            Some("2026-11-13T16:14:49+00:00")
+        );
+    }
+
+    #[test]
+    fn verifiable_saved_token_matches_the_status_view_of_configured() {
+        let mut values = HashMap::new();
+        assert!(super::verifiable_saved_token(&values).is_none());
+        values.insert("github_token".to_string(), "  ".to_string());
+        assert!(
+            super::verifiable_saved_token(&values).is_none(),
+            "blank token is no token, same as credential_status"
+        );
+        values.insert("github_token".to_string(), "secret".to_string());
+        assert_eq!(
+            super::verifiable_saved_token(&values).as_deref(),
+            Some("secret")
+        );
+    }
 
     #[test]
     fn github_credentials_save_persists_expiry_atomically_and_refreshes_runtime() {

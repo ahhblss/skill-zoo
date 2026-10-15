@@ -19,14 +19,54 @@ use std::path::Path;
 /// Write `data` to `path` atomically: write to a temp file first, then rename.
 /// On same-filesystem rename is atomic, so a crash never leaves a half-written file.
 pub(crate) fn atomic_write(path: &Path, data: impl AsRef<[u8]>) -> std::io::Result<()> {
-    let tmp_name = format!("{}.tmp", path.file_name().unwrap().to_str().unwrap());
-    let tmp_path = path.with_file_name(&tmp_name);
+    let tmp_path = temp_sibling(path);
     {
         let mut f = std::fs::File::create(&tmp_path)?;
         std::io::Write::write_all(&mut f, data.as_ref())?;
         f.sync_all()?;
     }
     std::fs::rename(&tmp_path, path)
+}
+
+/// Sibling temp file for the atomic writers, shared by name so the two
+/// variants cannot leave differently-named leftovers for the same target.
+fn temp_sibling(path: &Path) -> std::path::PathBuf {
+    let tmp_name = format!("{}.tmp", path.file_name().unwrap().to_str().unwrap());
+    path.with_file_name(&tmp_name)
+}
+
+/// Owner-only [`atomic_write`] for files that carry credential content
+/// (settings.json and lifecycle journals): the file is created `0600`
+/// regardless of umask.
+#[cfg(unix)]
+pub(crate) fn atomic_write_private(path: &Path, data: impl AsRef<[u8]>) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let tmp_path = temp_sibling(path);
+    // `open(O_CREAT)` applies the mode only to newly created files, so a
+    // stale temp file left by a crashed write would keep its old permissions.
+    if let Err(e) = std::fs::remove_file(&tmp_path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            return Err(e);
+        }
+    }
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp_path)?;
+        std::io::Write::write_all(&mut f, data.as_ref())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp_path, path)
+}
+
+/// Windows files inherit user-profile ACLs; no explicit mode is needed.
+#[cfg(not(unix))]
+pub(crate) fn atomic_write_private(path: &Path, data: impl AsRef<[u8]>) -> std::io::Result<()> {
+    atomic_write(path, data)
 }
 
 /// Normalize a path string to forward slashes for cross-platform consistency.
@@ -249,7 +289,7 @@ impl Settings {
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| AppError::Parse(format!("settings.json: {e}")))?;
-        atomic_write(&path, json).map_err(|e| error::io(&path, e))
+        atomic_write_private(&path, json).map_err(|e| error::io(&path, e))
     }
 
     pub fn get(&self, key: &str) -> Option<&String> {
@@ -258,5 +298,59 @@ impl Settings {
 
     pub fn set(&mut self, key: String, value: String) {
         self.values.insert(key, value);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod credential_file_permissions_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn owner_only(path: &Path) -> bool {
+        let mode = std::fs::metadata(path)
+            .unwrap_or_else(|e| panic!("metadata({}) failed: {e}", path.display()))
+            .permissions()
+            .mode();
+        mode & 0o077 == 0
+    }
+
+    #[test]
+    fn credential_bearing_writes_are_owner_only() {
+        let home = tempfile::tempdir().unwrap();
+        crate::config::with_test_home(home.path(), || {
+            // settings.json carries the saved token.
+            let settings = Settings {
+                values: HashMap::new(),
+            };
+            settings.save().unwrap();
+            let settings_path = config::get_app_config_dir().join("settings.json");
+            assert!(owner_only(&settings_path));
+
+            // A stale loose temp file from a crashed write must not leak its
+            // permissions into the next save.
+            let tmp_path = settings_path.with_file_name("settings.json.tmp");
+            std::fs::write(&tmp_path, b"stale").unwrap();
+            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o666)).unwrap();
+            settings.save().unwrap();
+            assert!(owner_only(&settings_path));
+            assert!(!tmp_path.exists());
+
+            // Agent lifecycle snapshots embed settings.json content; a
+            // successful commit leaves the restored file owner-only (the
+            // journal itself is removed by cleanup and is covered in
+            // agent_transaction's own tests).
+            let tx_dir = home.path().join("tx");
+            std::fs::create_dir(&tx_dir).unwrap();
+            agent_transaction::commit(
+                &tx_dir,
+                BTreeMap::from([(
+                    "settings.json".to_string(),
+                    Some("{\"values\":{}}".to_string()),
+                )]),
+            )
+            .unwrap();
+            assert!(owner_only(&tx_dir.join("settings.json")));
+        });
     }
 }

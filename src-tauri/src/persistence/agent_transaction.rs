@@ -123,7 +123,7 @@ fn write_snapshots(
         }
         let path = dir.join(name);
         if let Some(bytes) = content {
-            super::atomic_write(&path, bytes).map_err(|e| error::io(&path, e))?;
+            super::atomic_write_private(&path, bytes).map_err(|e| error::io(&path, e))?;
         } else if path.exists() {
             std::fs::remove_file(&path).map_err(|e| error::io(&path, e))?;
         }
@@ -198,7 +198,7 @@ fn commit_with(
     let path = dir.join("agent-lifecycle.json");
     let save = |j: &Journal| -> Result<(), AppError> {
         let bytes = serde_json::to_vec_pretty(j).map_err(|e| AppError::Parse(e.to_string()))?;
-        super::atomic_write(&path, bytes).map_err(|e| error::io(&path, e))
+        super::atomic_write_private(&path, bytes).map_err(|e| error::io(&path, e))
     };
     save(&journal)?;
     let result = (|| {
@@ -230,6 +230,31 @@ fn commit_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn uncommitted_journal_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let after = BTreeMap::from([("settings.json".into(), Some("new state".into()))]);
+        // Interrupt the post-commit cleanup so the journal survives for the
+        // crash-recovery window this test observes.
+        commit_with(tmp.path(), after, |stage| {
+            if stage == 2 {
+                Err(AppError::BadRequest("interrupted cleanup".into()))
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+        assert!(tmp.path().join("agent-lifecycle.json").exists());
+        let mode = std::fs::metadata(tmp.path().join("agent-lifecycle.json"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o077, 0, "journal must be owner-only, got {mode:o}");
+    }
 
     #[test]
     fn interrupted_postcommit_cleanup_rolls_forward() {
