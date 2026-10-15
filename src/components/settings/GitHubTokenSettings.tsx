@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ExternalLink, KeyRound } from "lucide-react";
+import { ExternalLink, KeyRound, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
@@ -13,9 +13,27 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { useGitHubToken, useGitHubTokenExpiresAt, useSaveGitHubToken } from "@/hooks/useSettings";
+import {
+  useGitHubCredentialStatus,
+  useGitHubTokenVerification,
+  useSaveGitHubToken,
+} from "@/hooks/useSettings";
 
 const EXPIRY_SOON_MS = 7 * 24 * 60 * 60 * 1000;
+
+// The glyph the platform actually draws for password masking: WebKit on macOS
+// swaps the disc replacement for the system font's private secure-dot glyph
+// U+F79A (RenderBlock::updateSecurityDiscCharacters, WebKit commit 69d20a8;
+// applies when the primary font is the system font — the app's default
+// Tailwind stack qualifies). Measured with Playwright WebKit: both the real
+// mask and a U+F79A run render 6.0px dots / 2.7px gaps at 14px, while "•" is
+// 2.7px and "●" 11.0px. Every other engine (Windows WebView2, Linux
+// WebKitGTK) draws plain U+2022 bullets, so those match the plain bullet.
+// Evaluated per call, not at module load, so it honors a stubbed userAgent in
+// tests.
+function maskGlyph(userAgent: string): string {
+  return userAgent.includes("Macintosh") ? "\uF79A" : "•";
+}
 
 type TokenExpiry = { date: string; expired: boolean; soon: boolean };
 
@@ -40,23 +58,42 @@ export function GitHubTokenSettings({
 } = {}) {
   const [internalOpen, setInternalOpen] = useState(false);
   const { t, i18n } = useTranslation();
-  const tokenQuery = useGitHubToken();
-  const expiresAtQuery = useGitHubTokenExpiresAt();
+  const statusQuery = useGitHubCredentialStatus();
   const saveToken = useSaveGitHubToken();
+  // null = untouched — the input shows the mask stand-in for the saved token.
+  // Any edit lands here as the replacement candidate.
   const [draft, setDraft] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const token = draft ?? tokenQuery.data ?? "";
+  const hasToken = statusQuery.data?.hasToken ?? false;
+  const maskGlyphChar = maskGlyph(navigator.userAgent);
+  const mask = maskGlyphChar.repeat(40);
+  const value = draft ?? (hasToken ? mask : "");
+  // Mask characters in the draft mean no new token was entered — untouched,
+  // partially cleared, or pasted back are all "unchanged".
+  const unchanged = draft === null || draft.includes(maskGlyphChar);
+  const canSave =
+    !statusQuery.isPending &&
+    !statusQuery.isError &&
+    !saveToken.isPending &&
+    !unchanged &&
+    Boolean(value.trim());
 
   const open = controlledOpen ?? internalOpen;
+  // Live check of the saved token while the dialog is open (an infrequent
+  // surface, and GitHub's rate-limit endpoint is free).
+  const verificationQuery = useGitHubTokenVerification({ enabled: open && hasToken });
   const setOpen = (next: boolean) => {
     if (!next) setDraft(null);
     (onOpenChange ?? setInternalOpen)(next);
   };
 
-  // A fresh verification wins; otherwise fall back to the expiry persisted at
-  // the last successful save so the state survives restarts.
+  // A fresh verification wins, then the dialog's live check, then the expiry
+  // persisted at the last successful save so the state survives restarts.
   const expiry = describeExpiry(
-    saveToken.data?.verification?.expiresAt ?? expiresAtQuery.data,
+    saveToken.data?.verification?.expiresAt ??
+      verificationQuery.data?.expiresAt ??
+      statusQuery.data?.expiresAt ??
+      null,
     i18n.language,
   );
   const activeTail =
@@ -66,7 +103,8 @@ export function GitHubTokenSettings({
         })
       : null;
   const withExpiryTail = (base: string) => (activeTail ? `${base} · ${activeTail}` : base);
-  const statusWarning = expiry?.expired || expiry?.soon;
+  const tokenInvalid = Boolean(verificationQuery.data && !verificationQuery.data.authenticated);
+  const statusWarning = Boolean(expiry?.expired || expiry?.soon) || tokenInvalid;
   const statusClass = cn(
     "text-xs",
     statusWarning ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground",
@@ -74,9 +112,9 @@ export function GitHubTokenSettings({
 
   // Row subtitle mirrors the maintenance row: state-driven, not a static label.
   const rowStatus = (() => {
-    if (tokenQuery.isPending) return t("settings.github.loading");
-    if (tokenQuery.isError) return t("settings.github.loadFailed");
-    if (expiry?.expired && tokenQuery.data) {
+    if (statusQuery.isPending) return t("settings.github.loading");
+    if (statusQuery.isError) return t("settings.github.loadFailed");
+    if (expiry?.expired && hasToken) {
       return t("settings.github.expiredLine", { date: expiry.date });
     }
     if (saveToken.data?.verification) {
@@ -84,7 +122,7 @@ export function GitHubTokenSettings({
         t("settings.github.active", { limit: saveToken.data.verification.limit }),
       );
     }
-    return t(tokenQuery.data ? "settings.github.configuredShort" : "settings.github.unconfigured");
+    return t(hasToken ? "settings.github.configuredShort" : "settings.github.unconfigured");
   })();
 
   const dialogStatus = (() => {
@@ -96,21 +134,27 @@ export function GitHubTokenSettings({
           : "settings.github.verifyFailed",
       );
     }
-    if (expiry?.expired && tokenQuery.data) {
-      return t("settings.github.expiredLine", { date: expiry.date });
-    }
     if (saveToken.data?.verification) {
       return withExpiryTail(
         t("settings.github.active", { limit: saveToken.data.verification.limit }),
       );
     }
-    return t(tokenQuery.data ? "settings.github.configured" : "settings.github.unconfigured");
+    // Live check fired on open: its truth beats stale persisted metadata.
+    if (verificationQuery.data?.authenticated) {
+      return withExpiryTail(t("settings.github.active", { limit: verificationQuery.data.limit }));
+    }
+    if (tokenInvalid) return t("settings.github.tokenInvalid");
+    if (verificationQuery.isFetching) return t("settings.github.verifying");
+    if (expiry?.expired && hasToken) {
+      return t("settings.github.expiredLine", { date: expiry.date });
+    }
+    return t(hasToken ? "settings.github.configuredShort" : "settings.github.unconfigured");
   })();
 
   return (
     <section className="space-y-3" aria-labelledby="github-connection-title">
       <div className="flex items-center gap-2 border-b border-border/40 pb-2">
-        <KeyRound className="h-4 w-4 text-blue-500" />
+        <SlidersHorizontal className="h-4 w-4 text-blue-500" />
         <h3 id="github-connection-title" className="text-sm font-medium">
           {t("settings.github.title")}
         </h3>
@@ -132,7 +176,7 @@ export function GitHubTokenSettings({
           onClick={() => setOpen(true)}
         >
           <KeyRound className="h-3.5 w-3.5" />
-          {t(tokenQuery.data ? "settings.github.manage" : "settings.github.setUp")}
+          {t(hasToken ? "settings.github.manage" : "settings.github.setUp")}
         </Button>
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
@@ -174,8 +218,10 @@ export function GitHubTokenSettings({
             className="space-y-2"
             onSubmit={(event) => {
               event.preventDefault();
-              if (saveToken.isPending || tokenQuery.isPending || tokenQuery.isError) return;
-              saveToken.mutate(token, { onSuccess: (result) => setDraft(result.token) });
+              // A submit without a new token (empty field or an unchanged
+              // mask) never reaches the backend.
+              if (!canSave) return;
+              saveToken.mutate(value, { onSuccess: () => setDraft(null) });
             }}
           >
             <label htmlFor="github-token" className="text-sm font-medium">
@@ -193,9 +239,13 @@ export function GitHubTokenSettings({
                 spellCheck={false}
                 aria-describedby="github-token-help github-token-status"
                 aria-invalid={saveToken.isError}
-                placeholder={t("settings.github.placeholder")}
-                value={token}
-                disabled={tokenQuery.isPending || tokenQuery.isError || saveToken.isPending}
+                placeholder={
+                  hasToken
+                    ? t("settings.github.placeholderReplace")
+                    : t("settings.github.placeholder")
+                }
+                value={value}
+                disabled={statusQuery.isPending || statusQuery.isError || saveToken.isPending}
                 onChange={(event) => {
                   setDraft(event.target.value);
                   saveToken.reset();
@@ -205,18 +255,13 @@ export function GitHubTokenSettings({
                     event.preventDefault();
                 }}
               />
-              <Button
-                type="submit"
-                size="sm"
-                disabled={tokenQuery.isPending || tokenQuery.isError || saveToken.isPending}
-              >
+              <Button type="submit" size="sm" disabled={!canSave}>
                 {t("settings.github.save")}
               </Button>
             </div>
             <p id="github-token-status" role="status" className={statusClass}>
               {dialogStatus}
             </p>
-            <p className="text-xs text-muted-foreground">{t("settings.github.clearHint")}</p>
           </form>
         </DialogContent>
       </Dialog>

@@ -45,13 +45,15 @@ export function SettingsView({
 
             {/* Skill Maintenance */}
             <SkillMaintenanceSettings onRequestGitHubTokenConfig={() => setGithubTokenOpen(true)} />
-            <GitHubTokenSettings open={githubTokenOpen} onOpenChange={setGithubTokenOpen} />
 
             {/* Skill Companion */}
             <SkillCompanionSettings
               openManagerRequest={skillCompanionOpenRequest}
               onOpenManagerRequestHandled={onSkillCompanionOpenHandled}
             />
+
+            {/* GitHub Connection */}
+            <GitHubTokenSettings open={githubTokenOpen} onOpenChange={setGithubTokenOpen} />
 
             {/* Agent Paths */}
             <AgentPathsSettings />

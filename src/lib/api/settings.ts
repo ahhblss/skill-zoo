@@ -15,6 +15,12 @@ export interface GitHubTokenVerification {
   expiresAt?: string | null;
 }
 
+/** Saved-state view of the credential — never carries the token itself. */
+export interface GitHubCredentialStatus {
+  hasToken: boolean;
+  expiresAt: string | null;
+}
+
 export const settingsApi = {
   previewCustomAgent: (name: string, skillsDir: string, agentId?: string) =>
     invoke<AgentPreview>("preview_custom_agent", { name, skillsDir, agentId }),
@@ -31,6 +37,8 @@ export const settingsApi = {
     invoke<AgentChangeResult>("remove_custom_agent", { agentId }),
   getSettings: () => invoke<Record<string, string>>("get_settings"),
 
+  getGitHubCredentialStatus: () => invoke<GitHubCredentialStatus>("get_github_credential_status"),
+
   updateSetting: (key: string, value: string) => invoke<void>("update_setting", { key, value }),
 
   saveGitHubCredentials: (token: string, expiresAt: string | null) =>
@@ -38,6 +46,9 @@ export const settingsApi = {
 
   verifyGitHubToken: (token: string) =>
     invoke<GitHubTokenVerification>("verify_github_token", { token }),
+
+  /** Live check of the saved token — the credential itself stays server-side. */
+  verifySavedGitHubToken: () => invoke<GitHubTokenVerification>("verify_saved_github_token"),
 
   getSkillCompanionItems: () => invoke<SkillCompanionItem[]>("get_skill_companion_items"),
 

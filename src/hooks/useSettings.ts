@@ -16,22 +16,33 @@ export const skillUsageKey = (agent: string) => ["settings", "skillUsage", agent
 const AGENT_ORDER_SETTING = "agent_order";
 const EMPTY_VISIBLE_AGENTS = Object.freeze({}) as VisibleAgents;
 
-const GITHUB_TOKEN_KEY = ["settings", "githubToken"] as const;
-const GITHUB_TOKEN_EXPIRES_KEY = ["settings", "githubTokenExpiresAt"] as const;
+const CREDENTIAL_STATUS_KEY = ["settings", "githubCredentialStatus"] as const;
+const GITHUB_TOKEN_VERIFICATION_KEY = ["settings", "githubTokenVerification"] as const;
 
-export function useGitHubToken() {
+/**
+ * Saved-state view of the GitHub credential (existence + expiry, never the
+ * token itself — the backend filters credential keys out of `get_settings`).
+ */
+export function useGitHubCredentialStatus() {
   return useQuery({
-    queryKey: GITHUB_TOKEN_KEY,
-    queryFn: async () => (await settingsApi.getSettings())["github_token"] ?? "",
+    queryKey: CREDENTIAL_STATUS_KEY,
+    queryFn: () => settingsApi.getGitHubCredentialStatus(),
     staleTime: 0,
   });
 }
 
-export function useGitHubTokenExpiresAt() {
+/**
+ * Live check of the saved token, fired while the credential dialog is open —
+ * an infrequent operation, and GitHub's /rate_limit endpoint is free. The
+ * saved token never crosses the bridge: the backend verifies it server-side
+ * and only the result is returned.
+ */
+export function useGitHubTokenVerification({ enabled }: { enabled: boolean }) {
   return useQuery({
-    queryKey: GITHUB_TOKEN_EXPIRES_KEY,
-    queryFn: async () => (await settingsApi.getSettings())["github_token_expires_at"] ?? "",
-    staleTime: 0,
+    queryKey: GITHUB_TOKEN_VERIFICATION_KEY,
+    queryFn: () => settingsApi.verifySavedGitHubToken(),
+    staleTime: 30_000,
+    enabled,
   });
 }
 
@@ -55,10 +66,19 @@ export function useSaveGitHubToken() {
       }
       return { token, verification };
     },
-    onSuccess: ({ token }) => {
-      qc.setQueryData(GITHUB_TOKEN_KEY, token);
-      qc.invalidateQueries({ queryKey: GITHUB_TOKEN_KEY });
-      qc.invalidateQueries({ queryKey: GITHUB_TOKEN_EXPIRES_KEY });
+    onSuccess: ({ token, verification }) => {
+      qc.setQueryData(CREDENTIAL_STATUS_KEY, {
+        hasToken: Boolean(token),
+        expiresAt: token ? (verification?.expiresAt ?? null) : null,
+      });
+      // Keep the dialog's live-check cache in agreement with the fresh save,
+      // so a quick reopen shows the just-verified result without refetching.
+      if (verification) {
+        qc.setQueryData(GITHUB_TOKEN_VERIFICATION_KEY, verification);
+      } else {
+        qc.invalidateQueries({ queryKey: GITHUB_TOKEN_VERIFICATION_KEY });
+      }
+      qc.invalidateQueries({ queryKey: CREDENTIAL_STATUS_KEY });
     },
   });
 }

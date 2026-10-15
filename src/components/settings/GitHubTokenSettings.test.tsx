@@ -1,14 +1,37 @@
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import { GitHubTokenSettings } from "./GitHubTokenSettings";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn().mockResolvedValue(undefined) }));
+
+/** Saved-state fixture the status command serves; token material never ships. */
+let saved: { token: string; expiresAt: string | null };
+
+function statusResponse() {
+  return { hasToken: saved.token.trim().length > 0, expiresAt: saved.expiresAt };
+}
+
+function mockDefault() {
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "get_settings") return Promise.resolve({ theme: "dark" });
+    if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
+    if (command === "verify_github_token") {
+      return Promise.resolve({ authenticated: true, limit: 5000 });
+    }
+    if (command === "save_github_credentials") {
+      const { token, expiresAt } = (args ?? {}) as { token?: string; expiresAt?: string | null };
+      saved = { token: token ?? "", expiresAt: token ? (expiresAt ?? null) : null };
+      return Promise.resolve();
+    }
+    return Promise.reject(new Error(`Unexpected command: ${command}`));
+  });
+}
 
 function renderSettings() {
   const client = new QueryClient({
@@ -28,41 +51,151 @@ async function openDialog(label = "Personal access token") {
   return input;
 }
 
-describe("GitHubTokenSettings", () => {
-  let saved: string;
+function stubUserAgent(ua: string) {
+  vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(ua);
+}
 
+describe("GitHubTokenSettings", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("en");
-    saved = "";
+    saved = { token: "", expiresAt: null };
     vi.mocked(invoke).mockReset();
     vi.mocked(openUrl).mockClear();
-    vi.mocked(invoke).mockImplementation((command, args) => {
-      if (command === "get_settings") return Promise.resolve({ github_token: saved });
-      if (command === "verify_github_token") {
-        return Promise.resolve({ authenticated: true, limit: 5000 });
-      }
-      if (command === "save_github_credentials") {
-        const { token } = (args ?? {}) as { token?: string };
-        saved = token ?? "";
-        return Promise.resolve();
-      }
-      return Promise.reject(new Error(`Unexpected command: ${command}`));
-    });
+    mockDefault();
+  });
+
+  afterEach(() => {
+    // Restore userAgent spies used by the mask-glyph tests.
+    vi.restoreAllMocks();
   });
 
   it("reflects the connection state on the row before any dialog is opened", async () => {
-    saved = "previous-token";
+    saved = { token: "previous-token", expiresAt: null };
     renderSettings();
     expect(await screen.findByText("Token configured")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /manage/i })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // Saved state arrives via the status command, not the generic settings read.
+    expect(
+      vi.mocked(invoke).mock.calls.some(([command]) => command === "get_github_credential_status"),
+    ).toBe(true);
   });
 
-  it("verifies the trimmed candidate before saving and reports the actual quota", async () => {
-    const user = userEvent.setup();
+  it("stands in the saved credential with a selectable mask, never the token", async () => {
+    stubUserAgent(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+    );
+    saved = { token: "previous-token", expiresAt: null };
     renderSettings();
     const input = await openDialog();
     expect(input).toHaveAttribute("type", "password");
+    // Real value, so select-all/delete/paste work; the glyph matches what the
+    // platform draws for password masking (U+F79A on macOS WebKit).
+    const maskValue = (input as HTMLInputElement).value;
+    expect(maskValue).toBe("\uF79A".repeat(40));
+    expect(maskValue).not.toContain("previous");
+    // Nothing new entered yet → saving is unavailable. (Row and dialog share
+    // the copy now, so scope to the dialog.)
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+    expect(within(screen.getByRole("dialog")).getByText("Token configured")).toBeInTheDocument();
+  });
+
+  it("verifies the saved token when the dialog opens and shows the live quota", async () => {
+    saved = { token: "previous-token", expiresAt: null };
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
+      if (command === "verify_saved_github_token") {
+        return Promise.resolve({ authenticated: true, limit: 4900, expiresAt: null });
+      }
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+    renderSettings();
+    await openDialog();
+    await screen.findByText("Active · quota: 4900 requests/hour");
+    const call = vi
+      .mocked(invoke)
+      .mock.calls.find(([command]) => command === "verify_saved_github_token");
+    expect(call).toBeDefined();
+    // The saved token never crosses the bridge: the backend verifies it itself.
+    expect(call?.[1]).toBeUndefined();
+  });
+
+  it("marks a saved token no longer valid when the live check reports unauthenticated", async () => {
+    saved = { token: "previous-token", expiresAt: null };
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
+      if (command === "verify_saved_github_token") {
+        return Promise.resolve({ authenticated: false, limit: 0, expiresAt: null });
+      }
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+    renderSettings();
+    await openDialog();
+    const line = await screen.findByText(
+      "Token no longer valid · GitHub rejected it, save a new one",
+    );
+    expect(line).toHaveClass("text-amber-600");
+    // The invalid verdict does not alter the saved credential.
+    expect(saved.token).toBe("previous-token");
+  });
+
+  it("keeps the saved-state line when the live check cannot run", async () => {
+    saved = { token: "previous-token", expiresAt: null };
+    vi.mocked(invoke).mockImplementation((command) => {
+      if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
+      if (command === "verify_saved_github_token") {
+        return Promise.reject(new Error("offline"));
+      }
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+    renderSettings();
+    await openDialog();
+    // A failed passive check is not the save flow's "Verification failed" —
+    // the dialog just keeps the saved-state display.
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("Token configured")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Verification failed/)).not.toBeInTheDocument();
+  });
+
+  it("matches the plain bullet mask on non-macOS engines", async () => {
+    stubUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    );
+    saved = { token: "previous-token", expiresAt: null };
+    renderSettings();
+    const input = await openDialog();
+    expect(input).toHaveValue("•".repeat(40));
+  });
+
+  it("keeps saving unavailable while mask characters remain in the field", async () => {
+    stubUserAgent(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+    );
+    const user = userEvent.setup();
+    saved = { token: "previous-token", expiresAt: null };
+    renderSettings();
+    const input = await openDialog();
+    const save = screen.getByRole("button", { name: /^save$/i });
+    // Partially cleared — still unchanged semantics.
+    fireEvent.change(input, { target: { value: "\uF79A".repeat(20) } });
+    expect(save).toBeDisabled();
+    // Dots mixed with new text — still not a token, still unavailable.
+    fireEvent.change(input, { target: { value: "\uF79A".repeat(10) + "abc" } });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(
+      vi.mocked(invoke).mock.calls.some(([command]) => command === "save_github_credentials"),
+    ).toBe(false);
+    expect(saved.token).toBe("previous-token");
+  });
+
+  it("verifies the trimmed candidate before saving and restores the mask afterwards", async () => {
+    const user = userEvent.setup();
+    saved = { token: "previous-token", expiresAt: null };
+    renderSettings();
+    const input = await openDialog();
+    expect(input).toHaveAttribute("type", "password");
+    await user.clear(input);
     await user.type(input, "  candidate-token  ");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     await screen.findAllByText("Active · quota: 5000 requests/hour");
@@ -75,17 +208,18 @@ describe("GitHubTokenSettings", () => {
     expect(commands.indexOf("verify_github_token")).toBeLessThan(
       commands.indexOf("save_github_credentials"),
     );
-    expect(input).toHaveValue("candidate-token");
-    await user.type(input, "-edited");
-    expect(screen.queryByText("Active · quota: 5000 requests/hour")).not.toBeInTheDocument();
+    // Write-only: the saved token never re-enters the input; the mask does.
+    // (Unstubbed jsdom UA → the plain-bullet mask branch.)
+    await waitFor(() => expect(input).toHaveValue("•".repeat(40)));
+    expect(saved.token).toBe("candidate-token");
   });
 
   it.each([0, 60])(
     "rejects unauthenticated quota %s without replacing a saved token",
     async (limit) => {
-      saved = "previous-token";
+      saved = { token: "previous-token", expiresAt: null };
       vi.mocked(invoke).mockImplementation((command) => {
-        if (command === "get_settings") return Promise.resolve({ github_token: saved });
+        if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
         return Promise.resolve({ authenticated: false, limit });
       });
       const user = userEvent.setup();
@@ -98,7 +232,7 @@ describe("GitHubTokenSettings", () => {
       expect(
         vi.mocked(invoke).mock.calls.some(([command]) => command === "save_github_credentials"),
       ).toBe(false);
-      expect(saved).toBe("previous-token");
+      expect(saved.token).toBe("previous-token");
       expect(input).toHaveValue("invalid-token");
     },
   );
@@ -109,7 +243,7 @@ describe("GitHubTokenSettings", () => {
       finish = resolve;
     });
     vi.mocked(invoke).mockImplementation((command) => {
-      if (command === "get_settings") return Promise.resolve({});
+      if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
       return verification;
     });
     const user = userEvent.setup();
@@ -129,7 +263,7 @@ describe("GitHubTokenSettings", () => {
 
   it("shows verification network failures without persisting or exposing raw errors", async () => {
     vi.mocked(invoke).mockImplementation((command) => {
-      if (command === "get_settings") return Promise.resolve({});
+      if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
       return Promise.reject(new Error("raw candidate-token error"));
     });
     const user = userEvent.setup();
@@ -146,7 +280,7 @@ describe("GitHubTokenSettings", () => {
 
   it("does not report active when persistence fails after verification", async () => {
     vi.mocked(invoke).mockImplementation((command) => {
-      if (command === "get_settings") return Promise.resolve({ github_token: "previous-token" });
+      if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
       if (command === "verify_github_token")
         return Promise.resolve({ authenticated: true, limit: 5000 });
       return Promise.reject(new Error("disk write failed"));
@@ -154,7 +288,6 @@ describe("GitHubTokenSettings", () => {
     const user = userEvent.setup();
     renderSettings();
     const input = await openDialog();
-    await user.clear(input);
     await user.type(input, "candidate-token");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     await screen.findByText(
@@ -163,29 +296,47 @@ describe("GitHubTokenSettings", () => {
     expect(screen.queryByText(/Active · quota/)).not.toBeInTheDocument();
   });
 
-  it("removes a whitespace-only token without network verification", async () => {
-    saved = "previous-token";
+  it("does not change the saved credential when nothing new is entered", async () => {
+    saved = { token: "previous-token", expiresAt: null };
     const user = userEvent.setup();
     renderSettings();
     const input = await openDialog();
+    const save = screen.getByRole("button", { name: /^save$/i });
+    // Untouched mask: saving is unavailable.
+    expect(save).toBeDisabled();
+    // Fully cleared: still nothing new to save.
     await user.clear(input);
-    await user.type(input, "   ");
+    expect(input).toHaveValue("");
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(
+      vi.mocked(invoke).mock.calls.some(([command]) => command === "save_github_credentials"),
+    ).toBe(false);
+    expect(saved.token).toBe("previous-token");
+  });
+
+  it("offers no removal affordance — saving a new token is the only way a credential changes", async () => {
+    saved = { token: "previous-token", expiresAt: null };
+    const user = userEvent.setup();
+    renderSettings();
+    const input = await openDialog();
+    expect(screen.queryByRole("button", { name: /remove token|confirm removal/i })).toBeNull();
+    // Select-all + paste (the clear) replaces the mask; the new token saves.
+    await user.clear(input);
+    await user.type(input, "replacement-token");
     await user.click(screen.getByRole("button", { name: /^save$/i }));
-    await screen.findAllByText("Not configured · anonymous quota: 60 requests/hour");
+    await screen.findAllByText("Active · quota: 5000 requests/hour");
     expect(invoke).toHaveBeenCalledWith("save_github_credentials", {
-      token: "",
+      token: "replacement-token",
       expiresAt: null,
     });
-    expect(
-      vi.mocked(invoke).mock.calls.some(([command]) => command === "verify_github_token"),
-    ).toBe(false);
-    expect(input).toHaveValue("");
+    expect(saved.token).toBe("replacement-token");
   });
 
   it("shows the verified token's expiry on the row and persists it", async () => {
     const user = userEvent.setup();
     vi.mocked(invoke).mockImplementation((command, args) => {
-      if (command === "get_settings") return Promise.resolve({});
+      if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
       if (command === "verify_github_token") {
         return Promise.resolve({
           authenticated: true,
@@ -194,8 +345,8 @@ describe("GitHubTokenSettings", () => {
         });
       }
       if (command === "save_github_credentials") {
-        const { token } = (args ?? {}) as { token?: string };
-        saved = token ?? "";
+        const { token, expiresAt } = (args ?? {}) as { token?: string; expiresAt?: string | null };
+        saved = { token: token ?? "", expiresAt: token ? (expiresAt ?? null) : null };
         return Promise.resolve();
       }
       return Promise.reject(new Error(`Unexpected command: ${command}`));
@@ -214,7 +365,7 @@ describe("GitHubTokenSettings", () => {
   it("warns when the verified token expires within seven days", async () => {
     const user = userEvent.setup();
     vi.mocked(invoke).mockImplementation((command) => {
-      if (command === "get_settings") return Promise.resolve({});
+      if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
       if (command === "verify_github_token") {
         return Promise.resolve({
           authenticated: true,
@@ -233,14 +384,12 @@ describe("GitHubTokenSettings", () => {
   });
 
   it("flags an expired saved token on the row without a fresh verification", async () => {
-    saved = "previous-token";
+    saved = {
+      token: "previous-token",
+      expiresAt: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+    };
     vi.mocked(invoke).mockImplementation((command) => {
-      if (command === "get_settings") {
-        return Promise.resolve({
-          github_token: saved,
-          github_token_expires_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-        });
-      }
+      if (command === "get_github_credential_status") return Promise.resolve(statusResponse());
       return Promise.reject(new Error(`Unexpected command: ${command}`));
     });
     renderSettings();
@@ -252,7 +401,7 @@ describe("GitHubTokenSettings", () => {
   });
 
   it("distinguishes a saved token from a fresh verification and opens the creation page", async () => {
-    saved = "previous-token";
+    saved = { token: "previous-token", expiresAt: null };
     const user = userEvent.setup();
     renderSettings();
     expect(await screen.findByText("Token configured")).toBeInTheDocument();
@@ -284,5 +433,6 @@ describe("GitHubTokenSettings", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Repository access 选择 Public Repositories/)).toBeInTheDocument();
     expect(screen.getByLabelText("个人访问令牌")).toHaveAttribute("type", "password");
+    expect(screen.getByLabelText("个人访问令牌")).toHaveValue("");
   });
 });

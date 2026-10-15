@@ -66,6 +66,8 @@ describe("SkillMaintenanceSettings", () => {
           return Promise.resolve([]);
         case "get_settings":
           return Promise.resolve({});
+        case "get_github_credential_status":
+          return Promise.resolve({ hasToken: false, expiresAt: null });
         case "get_cache_size":
           return Promise.resolve(1024);
         case "get_skill_update_history":
@@ -88,6 +90,8 @@ describe("SkillMaintenanceSettings", () => {
           return Promise.resolve([{ id: "skill:demo", directory: "demo", origin: "ssot" }]);
         case "get_settings":
           return Promise.resolve({});
+        case "get_github_credential_status":
+          return Promise.resolve({ hasToken: false, expiresAt: null });
         case "get_cache_size":
           return Promise.resolve(0);
         case "check_skill_updates":
@@ -165,6 +169,8 @@ describe("SkillMaintenanceSettings", () => {
           ]);
         case "get_settings":
           return Promise.resolve({});
+        case "get_github_credential_status":
+          return Promise.resolve({ hasToken: false, expiresAt: null });
         case "get_cache_size":
           return Promise.resolve(0);
         case "get_skill_update_history":
@@ -229,6 +235,8 @@ describe("SkillMaintenanceSettings", () => {
           ]);
         case "get_settings":
           return Promise.resolve({});
+        case "get_github_credential_status":
+          return Promise.resolve({ hasToken: false, expiresAt: null });
         case "get_cache_size":
           return Promise.resolve(1024);
         case "get_skill_update_history":
@@ -283,6 +291,8 @@ describe("SkillMaintenanceSettings", () => {
           ]);
         case "get_settings":
           return Promise.resolve({});
+        case "get_github_credential_status":
+          return Promise.resolve({ hasToken: false, expiresAt: null });
         case "get_cache_size":
           return Promise.resolve(1024);
         case "get_skill_update_history":
@@ -338,6 +348,8 @@ describe("SkillMaintenanceSettings", () => {
           ]);
         case "get_settings":
           return Promise.resolve({});
+        case "get_github_credential_status":
+          return Promise.resolve({ hasToken: false, expiresAt: null });
         case "get_cache_size":
           return Promise.resolve(1024);
         case "get_skill_update_history":
@@ -404,6 +416,8 @@ describe("SkillMaintenanceSettings", () => {
           return Promise.resolve([]);
         case "get_settings":
           return Promise.resolve({});
+        case "get_github_credential_status":
+          return Promise.resolve({ hasToken: false, expiresAt: null });
         case "get_cache_size":
           return Promise.resolve(1024);
         case "get_skill_update_history":
@@ -457,6 +471,8 @@ describe("SkillMaintenanceSettings", () => {
           ]);
         case "get_settings":
           return Promise.resolve({});
+        case "get_github_credential_status":
+          return Promise.resolve({ hasToken: false, expiresAt: null });
         case "get_cache_size":
           return Promise.resolve(1024);
         case "get_skill_update_history":
@@ -500,6 +516,8 @@ describe("SkillMaintenanceSettings", () => {
           ]);
         case "get_settings":
           return Promise.resolve({});
+        case "get_github_credential_status":
+          return Promise.resolve({ hasToken: false, expiresAt: null });
         case "get_cache_size":
           return Promise.resolve(1024);
         case "get_skill_update_history":
