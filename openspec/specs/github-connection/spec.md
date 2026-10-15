@@ -23,13 +23,17 @@ The desktop SHALL accept a trimmed personal access token, verify it against GitH
 - **WHEN** verification fails due to transport, unexpected HTTP status or malformed data, or settings cannot be persisted
 - **THEN** an actionable failure is shown and saved/runtime authentication remains unchanged
 
-### Requirement: Token removal and startup
+### Requirement: Token replacement and startup
 
-A saved token SHALL supply desktop GitHub authentication at startup while its recorded expiry has not passed. Saving an empty or whitespace-only input SHALL remove the token and its expiry without network verification and restore anonymous requests. A saved token SHALL NOT be presented as freshly verified merely because it exists on disk.
+The desktop SHALL maintain at most one saved GitHub credential. Saving a new verified token SHALL replace the previous credential and its expiry in a single write, and the desktop SHALL NOT offer a credential removal action. Submitting an empty input SHALL NOT change the saved credential. A saved token SHALL supply authentication at startup while its recorded expiry has not passed and SHALL NOT be presented as freshly verified merely because it exists on disk.
 
-#### Scenario: Remove token offline
-- **WHEN** the user clears the input and saves while offline
-- **THEN** the token and its expiry are removed from settings and new requests omit Authorization
+#### Scenario: New token replaces the old
+- **WHEN** a new token is verified and saved while a previous credential exists
+- **THEN** the new token and its expiry replace the previous ones in a single write
+
+#### Scenario: No new token entered
+- **WHEN** the credential dialog is submitted without a new token — an empty field or an unchanged mask — while a token is saved
+- **THEN** the saved token and its expiry remain unchanged
 
 #### Scenario: Restart with configured token
 - **WHEN** the desktop starts with a saved token
@@ -38,6 +42,70 @@ A saved token SHALL supply desktop GitHub authentication at startup while its re
 #### Scenario: Failed credential save
 - **WHEN** persisting a token and its expiry fails
 - **THEN** persisted settings and runtime authentication both remain unchanged
+
+### Requirement: Saved credential is never redisplayed
+
+The settings UI SHALL NOT display the saved token or any part of it, and the generic settings read SHALL NOT include the credential keys. The dialog SHALL stand in for the saved token with a mask value carrying no information about the secret; while mask characters remain, the credential counts as unchanged and saving stays unavailable.
+
+#### Scenario: Dialog with a saved token
+- **WHEN** the credential dialog opens while a token is saved
+- **THEN** the input holds the mask, never the token, and saving stays unavailable until the field actually changes
+
+#### Scenario: Generic settings read omits credentials
+- **WHEN** the generic settings read is invoked
+- **THEN** the response contains neither `github_token` nor `github_token_expires_at`
+
+#### Scenario: Mask behaves like content
+- **WHEN** the user focuses, selects, deletes, or replaces the mask
+- **THEN** the field behaves like ordinary text editing, with no automatic selection
+
+#### Scenario: After a successful save
+- **WHEN** a token is verified and saved
+- **THEN** the input reverts to the mask and the status line shows the verified quota and recorded expiry
+
+### Requirement: Dialog verifies the saved credential
+
+While a token is saved, opening the credential dialog SHALL verify it against GitHub's rate-limit endpoint through a command that reads the credential server-side, and SHALL display the verified quota. A check that reports the credential unauthenticated SHALL mark it no longer valid without altering the saved credential. A transport failure during this check SHALL leave the saved-state display unchanged.
+
+#### Scenario: Dialog opens with a saved token
+- **WHEN** the credential dialog opens while a token is saved
+- **THEN** the saved token is verified without crossing the bridge and the dialog shows the verified quota
+
+#### Scenario: Saved token no longer valid
+- **WHEN** the verification reports the credential unauthenticated
+- **THEN** the dialog marks the token no longer valid and the saved credential remains unchanged
+
+#### Scenario: Live check unavailable
+- **WHEN** the verification cannot reach GitHub
+- **THEN** the dialog keeps the saved-state display and the saved credential remains unchanged
+
+### Requirement: Credential keys have a single write path
+
+The generic settings update command SHALL reject the GitHub credential keys `github_token` and `github_token_expires_at` with an actionable error. Credential changes SHALL only be applied through the credential save command, so the runtime authentication slot can never silently diverge from persisted credentials.
+
+#### Scenario: Generic settings update rejects a credential key
+- **WHEN** the generic settings update command is invoked with `github_token` or `github_token_expires_at`
+- **THEN** the command fails with an error naming the credential save command and neither key's persisted value nor the runtime authentication changes
+
+#### Scenario: Credential save command remains authoritative
+- **WHEN** a credential is saved or removed through the credential save command
+- **THEN** persisted settings and runtime authentication change together in one write
+
+### Requirement: Credential-bearing files are owner-only
+
+Files the desktop writes that carry credential content — `settings.json` and agent lifecycle journals — SHALL be written with owner-only file permissions (`0600`), independent of the process umask, on systems with unix file modes. Owner-only permissions SHALL apply to fresh writes and to writes that reuse a temp file left by an earlier failed write.
+
+#### Scenario: Token saved lands owner-only
+- **WHEN** a token is saved and settings are persisted on a unix system
+- **THEN** `settings.json` has no group or other read permission regardless of umask
+
+#### Scenario: Journal snapshot lands owner-only
+- **WHEN** an agent lifecycle transaction journals `settings.json` content on a unix system
+- **THEN** the journal file is written with no group or other read permission
+
+#### Scenario: Failed write leaves a stale temp file
+- **WHEN** a previous credential write crashed and left a temp file, and a new credential write reuses its path
+- **THEN** the persisted file still ends up owner-only
 
 ### Requirement: Authentication covers public API reads
 
