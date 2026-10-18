@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ExternalLink, KeyRound, SlidersHorizontal } from "lucide-react";
+import { ExternalLink, KeyRound, PlugZap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
@@ -154,7 +154,7 @@ export function GitHubTokenSettings({
   return (
     <section className="space-y-3" aria-labelledby="github-connection-title">
       <div className="flex items-center gap-2 border-b border-border/40 pb-2">
-        <SlidersHorizontal className="h-4 w-4 text-blue-500" />
+        <PlugZap className="h-4 w-4 text-blue-500" />
         <h3 id="github-connection-title" className="text-sm font-medium">
           {t("settings.github.title")}
         </h3>
