@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.55] — 2026-10-18
+
+### Changed
+- The GitHub API access token dialog is replace-only: a saved token is never redisplayed, only replaced, and it is verified live without the secret crossing the app's Tauri bridge.
+- GitHub credentials are now written owner-only (0600) and filtered out of general settings reads and updates, so the token is no longer reachable through the settings surface. A blank legacy token is never sent to GitHub.
+- The token lives under a section titled "Advanced features", placed below Skill Companion, with a connection icon.
+
+### Fixed
+- A saved GitHub token no longer leaks into general settings payloads; the app exposes only the saved and verification state until the user replaces it.
+
 ## [0.3.54] — 2026-10-15
 
 ### Added
