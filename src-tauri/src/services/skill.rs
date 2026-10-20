@@ -2201,14 +2201,22 @@ impl SkillService {
                 "Merge destination is already occupied".into(),
             ));
         }
-        if !dest_dir.exists() {
+        let created_dest = !dest_dir.exists();
+        if created_dest {
             std::fs::create_dir_all(&ssot_dir).map_err(|e| crate::error::io(&ssot_dir, e))?;
             Self::copy_dir_recursive(std::path::Path::new(source_path), &dest_dir)?;
         }
         if Self::compute_content_hash(&dest_dir.to_string_lossy()).as_ref() != Some(&expected_hash)
         {
+            // The copy skips symlinked files while the hash counts them, so a
+            // skill containing symlinked files can never verify. Roll back the
+            // partial destination: leaving it behind would make the next merge
+            // fail as "already occupied" with no way to recover from the UI.
+            if created_dest {
+                let _ = std::fs::remove_dir_all(&dest_dir);
+            }
             return Err(AppError::BadRequest(
-                "Cannot verify merge destination".into(),
+                "Cannot verify merge destination: skills containing symlinked files cannot be merged".into(),
             ));
         }
 

@@ -126,3 +126,46 @@ fn test_desktop_lease_write_preserves_metadata_committed_by_cli() {
         assert!(disk.get("ssot:other").starred);
     });
 }
+
+/// The copy skips symlinked files while the content hash counts them, so a
+/// skill containing symlinked files cannot pass destination verification.
+/// The failed copy must be rolled back: leaving it behind would make the next
+/// merge fail as "already occupied" with nothing in the UI to recover from.
+#[cfg(unix)]
+#[test]
+fn test_merge_rolls_back_partial_destination_for_symlinked_sources() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempfile::tempdir().unwrap();
+    config::with_test_home(tmp.path(), || {
+        let mut entries = Vec::new();
+        for agent in ["codex", "gemini"] {
+            let native = config::get_agent_skills_dir(agent).unwrap().join("demo");
+            std::fs::create_dir_all(&native).unwrap();
+            std::fs::write(native.join("SKILL.md"), "# demo").unwrap();
+            std::fs::write(native.join("real.txt"), "shared").unwrap();
+            symlink("real.txt", native.join("alias.txt")).unwrap();
+            let mut e = make_cache_entry(&format!("agent:{agent}:demo"), "demo", "demo");
+            e.origin = "agent".into();
+            e.home_agent = Some(agent.into());
+            e.home_path = Some(native.to_string_lossy().into_owned());
+            e.content_hash = Some("same".into());
+            entries.push(e);
+        }
+        let cache = RwLock::new(SkillCache::from_entries(entries));
+        let metadata = RwLock::new(MetadataStore {
+            entries: HashMap::new(),
+        });
+
+        assert!(SkillService::merge_duplicates_to_ssot("demo", &cache, &metadata).is_err());
+        assert!(
+            !config::get_agents_skills_dir().join("demo").exists(),
+            "failed verification must not leave a partial SSOT copy"
+        );
+        for agent in ["codex", "gemini"] {
+            let native = config::get_agent_skills_dir(agent).unwrap().join("demo");
+            assert!(native.join("SKILL.md").exists(), "originals must survive");
+            assert!(native.join("alias.txt").exists(), "originals must survive");
+        }
+    });
+}

@@ -117,8 +117,12 @@ export async function pathStartsWith(candidate: string, root: string): Promise<b
 export async function assertAgentLinkAvailable(linkPath: string, targetPath: string): Promise<void> {
   const existing = await lstatSafe(linkPath);
   if (!existing) return;
-  if (await isSymlinkOrJunction(linkPath) && await pathsEqual(linkPath, targetPath)) return;
-  throw new Error(`Cannot create agent link: destination already exists at ${linkPath}`);
+  const isLink = await isSymlinkOrJunction(linkPath);
+  if (isLink && await pathsEqual(linkPath, targetPath)) return;
+  const hint = isLink
+    ? "it points at a different target; remove it or repair it with `skill-zoo doctor fix`"
+    : "move or remove it first";
+  throw new Error(`Cannot create agent link: ${linkPath} already exists; ${hint}.`);
 }
 
 export async function createAgentLink(linkPath: string, targetPath: string): Promise<boolean> {
