@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- User metadata is keyed by installation directory instead of provenance, so stars and "my skills" survive a skill's source changing; legacy `repo:` keys are migrated on first load.
+- The recommended-repositories list replaces `agentbay-ai/agentbay-skills` with `HKUSTDial/Supervisor-Skills` (research workflow from idea evaluation to rebuttal).
+- The branch map now matches the repository: `main` is the development line, and the 0.3.56 compatibility branches are reference-only.
+
+### Fixed
+- Importing an external skill no longer overwrites an existing directory or a link pointing elsewhere: every target is preflighted and partial links roll back, `doctor fix` replaces only paths verified as symlinks, and collision errors now say how to proceed.
+- Merging duplicate skills verifies every source and the destination before deleting any original, migrates user marks in one write, and rolls back a partial destination it created; skills containing symlinked files are rejected with a clear reason instead of leaving an "already occupied" directory behind.
+- Desktop metadata writers reload disk state under the shared lease, so a mark committed by the CLI during a session is no longer overwritten by an older snapshot; cache refreshes reload metadata before rendering.
+- Saving a skill confirms only the submitted revision: text typed while the save is in flight stays an unsaved draft. Auxiliary file drafts are kept per file and gate switching, closing and archiving.
+- A late app-update check can no longer regress a finished download; the collapsed file sidebar is `inert` and returns focus to its toggle.
+- Lock read-modify-write preserves unknown optional fields, so data written by newer producers survives older writers.
+- The website's download links fall back to the releases list when no version is known instead of fabricating a `v0.0.0` asset URL.
+
 ## [0.3.55] — 2026-10-18
 
 ### Changed
