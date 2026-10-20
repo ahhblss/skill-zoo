@@ -10,6 +10,8 @@ src-tauri/gen/
 *.tsbuildinfo
 
 archived/
+!adr/archived/
+!adr/archived/**
 .worktrees/
 .workbuddy/
 docs/superpowers/

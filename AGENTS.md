@@ -22,6 +22,10 @@
 
 **Recognize local optima.** When a series of incremental changes reveals that a broader refactor would yield a better outcome, stop and ask the user before proceeding.
 
+## Branch Canonicality
+
+`next/own-protocol` is the canonical development line, based on `main` (`v0.3.55`). `next/curated` is the 0.3.56 compatibility experiment (`v0.3.56-beta.4` local tag) and `next/verified-baselines` is the frozen 0.3.56 prerelease experiment; both are reference-only. `main` is the stable line. Review own-protocol from `main`/`v0.3.55`.
+
 ## What This Project Is
 
 A desktop app for managing AI coding assistant Skills. Users browse, install, create, and manage Skill files across multiple agents (Claude Code, Codex, Gemini, Cursor, etc.).
@@ -75,9 +79,9 @@ Protocol-impacting work includes changes to desktop-owned local state shape, pat
 
 The fixtures under `fixtures/local-protocol/` represent the desktop app's current protocol. If a CLI fixture test fails, fix the CLI to follow the desktop protocol unless the desktop protocol itself intentionally changed.
 
-### Compatibility with `npx skill`
+### Compatibility with external skill managers
 
-`CliService` is a native Rust reimplementation of the `npx skill` CLI (vercel-labs/skills v1.5.3) — the app no longer shells out to it. We must stay at least on par with the CLI and remain compatible where possible, since users may use both. Watch for upstream changes and mirror them.
+`CliService` is our native implementation of the install/update behavior we need. We do not target protocol compatibility with `npx skill` or `gh skill`; their schemas and semantics are sources of ideas, not contracts. Borrow capabilities when they improve our product; do not mirror upstream changes or add compatibility-only branches. See ADR 1.
 
 ### Tauri IPC Is the Only Bridge
 
@@ -104,6 +108,10 @@ The repo manages behavior-level changes through OpenSpec: open a change (proposa
 - Project context lives in `openspec/config.yaml`; principle-level conventions are this file.
 - Gate: `openspec validate --all --strict`.
 - Typo-level or pure-tooling fixes don't need a change — match ceremony to stakes (see How We Work).
+
+## Architecture Decisions
+
+Architecture decisions live in `adr/` (ADR Kit). At the start of any coding, design, or review task, run `adrkit list`; read the relevant `implemented/` records in full, check `proposed/` for intent and `rejected/` for anti-patterns; use `adrkit relevant <path>` for the files you touch. Implemented records are current authority. A changed choice needs a new record or `adrkit supersede --by`, never a silent rewrite. Gate: `adrkit validate --all`.
 
 ## Testing
 
