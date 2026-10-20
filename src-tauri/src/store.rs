@@ -12,6 +12,22 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Hold the shared writer lease before refreshing desktop-owned mutable state.
+    /// The CLI may have committed metadata since this desktop session started.
+    pub fn acquire_local_lease(
+        &self,
+    ) -> Result<crate::persistence::agent_transaction::AgentLease, crate::error::AppError> {
+        let lease = crate::persistence::agent_transaction::AgentLease::acquire(
+            &crate::config::get_app_config_dir(),
+        )?;
+        let mut metadata = self
+            .metadata
+            .write()
+            .map_err(|e| crate::error::AppError::Parse(format!("Metadata lock: {e}")))?;
+        *metadata = MetadataStore::load()?;
+        Ok(lease)
+    }
+
     pub fn new(skill_cache: SkillCache, metadata: MetadataStore, settings: Settings) -> Self {
         Self {
             update_exit: Default::default(),

@@ -93,6 +93,10 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<AppUpdateError>(null);
   const updateRef = useRef<Update | null>(null);
   const busyRef = useRef(false);
+  // Request generation: every async flow bumps this when it starts and only
+  // applies its results while still the newest flow, so a stale startup check
+  // can never regress downloading/readyToRestart back to idle/available.
+  const requestGenRef = useRef(0);
 
   useEffect(() => {
     let mounted = true;
@@ -121,9 +125,10 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
           setVersion(cachedVersion);
           setStatus("available");
 
+          const gen = ++requestGenRef.current;
           check()
             .then((result) => {
-              if (!mounted) return;
+              if (!mounted || gen !== requestGenRef.current) return;
               if (result) {
                 updateRef.current = result;
                 writeLastKnownUpdateVersion(result.version);
@@ -158,6 +163,7 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
 
   const downloadUpdate = useCallback(
     async (current: Update) => {
+      const gen = ++requestGenRef.current;
       setStatus("downloading");
       setError(null);
       setDownloadedBytes(0);
@@ -173,8 +179,10 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
               break;
           }
         });
+        if (gen !== requestGenRef.current) return;
         setStatus("readyToRestart");
       } catch {
+        if (gen !== requestGenRef.current) return;
         setStatus("error");
         setError("downloadFailed");
         toast.error(t("settings.updater.downloadFailed"));
@@ -186,12 +194,14 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
   const checkForUpdate = useCallback(
     async ({ notifyUpToDate = true, notifyError = true } = {}) => {
       if (busyRef.current || status === "unsupported" || status === "loading") return;
+      const gen = ++requestGenRef.current;
       busyRef.current = true;
       setStatus("checking");
       setError(null);
 
       try {
         const result = await check();
+        if (gen !== requestGenRef.current) return;
         if (result) {
           updateRef.current = result;
           writeLastKnownUpdateVersion(result.version);
@@ -207,6 +217,7 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
           if (notifyUpToDate) toast.success(t("settings.updater.upToDate"));
         }
       } catch {
+        if (gen !== requestGenRef.current) return;
         setStatus("idle");
         setError("checkFailed");
         if (notifyError) toast.error(t("settings.updater.checkFailed"));
@@ -233,9 +244,11 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
     busyRef.current = true;
     setStatus("checking");
     setError(null);
+    const gen = ++requestGenRef.current;
 
     try {
       const result = await check();
+      if (gen !== requestGenRef.current) return;
       if (result) {
         updateRef.current = result;
         writeLastKnownUpdateVersion(result.version);
@@ -250,6 +263,7 @@ export function AppUpdaterProvider({ children }: { children: ReactNode }) {
         toast.success(t("settings.updater.upToDate"));
       }
     } catch {
+      if (gen !== requestGenRef.current) return;
       setStatus("idle");
       setError("checkFailed");
       toast.error(t("settings.updater.checkFailed"));

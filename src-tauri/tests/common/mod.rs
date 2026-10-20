@@ -33,6 +33,7 @@ pub fn make_cache_entry(id: &str, name: &str, directory: &str) -> SkillCacheEntr
 #[allow(dead_code)]
 pub fn make_lock_entry(source: &str) -> SkillLockEntry {
     SkillLockEntry {
+        extra: Default::default(),
         source: Some(source.to_string()),
         source_type: Some("github".to_string()),
         source_url: None,

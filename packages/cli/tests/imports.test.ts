@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
@@ -719,5 +720,22 @@ describe("CLI imports commands", () => {
     const parsed = JSON.parse(stdout.toString()) as { ok: boolean; error: string };
     expect(parsed.ok).toBe(false);
     expect(parsed.error).toContain("Refusing to write");
+  });
+});
+
+describe("import collision safety", () => {
+  it("rejects a real agent directory before creating any selected links", async () => {
+    const home = await makeTempHome();
+    const source = path.join(home, "private", "demo");
+    const existing = path.join(home, ".codex", "skills", "demo");
+    await writeSkill(source, "name: Imported");
+    await writeSkill(existing, "name: User-owned");
+    const result = await importExternalSkills(home, [source], ["claude-code", "codex"]);
+    expect(result.added).toEqual([]);
+    expect(result.failed).toHaveLength(1);
+    expect((await fs.lstat(existing)).isDirectory()).toBe(true);
+    expect(await fs.readFile(path.join(existing, "SKILL.md"), "utf8")).toContain("User-owned");
+    expect((await readExternalImports(home)).imports).toEqual({});
+    await expect(fs.lstat(path.join(home, ".claude", "skills", "demo"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

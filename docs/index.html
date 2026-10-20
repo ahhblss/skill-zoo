@@ -4847,8 +4847,13 @@
         }
       }
 
+      const RELEASES_URL = `https://github.com/${REPO}/releases`;
+
       function getDownloadUrl(os, version) {
-        const v = version || cachedVersion || "v0.0.0";
+        const v = version || cachedVersion;
+        // Never fabricate an asset URL for an unknown version; send the user
+        // to the releases list instead.
+        if (!v) return RELEASES_URL;
         const base = `https://github.com/${REPO}/releases/download/${v}`;
         if (os === "macos") return `${base}/Skill-Zoo-${v}-macOS.dmg`;
         if (os === "linux")
@@ -4857,20 +4862,23 @@
       }
 
       function getPortableUrl(version) {
-        const v = version || cachedVersion || "v0.0.0";
+        const v = version || cachedVersion;
+        if (!v) return RELEASES_URL;
         return `https://github.com/${REPO}/releases/download/${v}/Skill-Zoo-${v}-Windows-Portable.zip`;
       }
 
       function getFilename(os, version) {
-        const v = version || cachedVersion || "v0.0.0";
-        if (os === "macos") return `Skill-Zoo-${v}-macOS.dmg`;
+        const v = version || cachedVersion;
+        const tag = v ? `${v}-` : "";
+        if (os === "macos") return `Skill-Zoo-${tag}macOS.dmg`;
         if (os === "linux")
-          return `Skill-Zoo-${v}-Linux-${detectLinuxArch()}.AppImage`;
-        return `Skill-Zoo-${v}-Windows.exe`;
+          return `Skill-Zoo-${tag}Linux-${detectLinuxArch()}.AppImage`;
+        return `Skill-Zoo-${tag}Windows.exe`;
       }
 
       function getLinuxPackageUrl(version, arch, ext) {
-        const v = version || cachedVersion || "v0.0.0";
+        const v = version || cachedVersion;
+        if (!v) return RELEASES_URL;
         return `https://github.com/${REPO}/releases/download/${v}/Skill-Zoo-${v}-Linux-${arch}.${ext}`;
       }
 
@@ -5014,7 +5022,9 @@
         downloadURL = getDownloadUrl(os, cachedVersion);
         openModal(os);
 
-        if (downloadURL) {
+        // Auto-download only with a known version; an unknown version leaves
+        // the modal's manual link on the releases list instead.
+        if (downloadURL && cachedVersion) {
           const a = document.createElement("a");
           a.href = downloadURL;
           a.download = "";

@@ -555,9 +555,7 @@ pub async fn import_external_skills(
     selections: Vec<ExternalImportSelection>,
     agents: Vec<String>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+    let _agent_lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     if selections.is_empty() {
         return Err("No external skills selected".into());
     }
@@ -719,9 +717,7 @@ pub async fn import_external_skills(
 
 #[tauri::command]
 pub fn remove_external_import(state: State<'_, AppState>, import_id: String) -> Result<(), String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+    let _agent_lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     let mut imports = ExternalImports::load().map_err(|e| e.to_string())?;
     let import = imports
         .imports
@@ -746,9 +742,7 @@ pub fn clean_external_import_links(
     state: State<'_, AppState>,
     import_id: Option<String>,
 ) -> Result<usize, String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+    let _agent_lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     let imports = ExternalImports::load().map_err(|e| e.to_string())?;
     let mut removed = 0;
     for import in imports.imports.values() {
@@ -845,9 +839,7 @@ pub async fn install_skills(
     skill_names: Vec<String>,
     agents: Vec<String>,
 ) -> Result<Vec<InstalledSkill>, CommandError> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(CommandError::from)?;
+    let _agent_lease = state.acquire_local_lease().map_err(CommandError::from)?;
     for agent in &agents {
         if !config::agents().iter().any(|config| config.id == *agent) {
             return Err(CommandError::from(AppError::BadRequest(format!(
@@ -933,9 +925,7 @@ pub async fn update_skill(
     state: State<'_, AppState>,
     skill_id: String,
 ) -> Result<SingleSkillUpdateResult, CommandError> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(CommandError::from)?;
+    let _agent_lease = state.acquire_local_lease().map_err(CommandError::from)?;
     let skill = SkillService::find_in_cache(&state.skill_cache, &skill_id)
         .map_err(CommandError::from)?
         .ok_or_else(|| CommandError::not_found(format!("Skill not found: {skill_id}")))?;
@@ -1056,9 +1046,7 @@ pub async fn update_all_skills(
     checked_updates: Option<Vec<CheckedSkillUpdate>>,
 ) -> Result<UpdateAllResult, String> {
     let _update_guard = state.update_exit.start_update();
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(lease_command_error)?;
+    let _agent_lease = state.acquire_local_lease().map_err(lease_command_error)?;
     let started_at = chrono::Utc::now().to_rfc3339();
     let (mode, requested_skills, update_result) = if let Some(checked_updates) = checked_updates {
         let requested_skills: Vec<String> = checked_updates
@@ -1454,9 +1442,7 @@ pub async fn remove_skills(
     state: State<'_, AppState>,
     skill_ids: Vec<String>,
 ) -> Result<RemoveSkillsResult, String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(lease_command_error)?;
+    let _agent_lease = state.acquire_local_lease().map_err(lease_command_error)?;
     let mut removed: Vec<String> = Vec::new();
     let mut failed: Vec<RemoveSkillFailure> = Vec::new();
 
@@ -1772,9 +1758,7 @@ pub fn archive_skills(
     state: State<'_, AppState>,
     skill_ids: Vec<String>,
 ) -> Result<ArchiveSkillsResult, String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+    let _agent_lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     let mut archived: Vec<String> = Vec::new();
     let mut failed: Vec<ArchiveSkillFailure> = Vec::new();
 
@@ -1793,9 +1777,7 @@ pub fn restore_archived_skills(
     state: State<'_, AppState>,
     archive_ids: Vec<String>,
 ) -> Result<RestoreArchivedSkillsResult, String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+    let _agent_lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     let mut restored: Vec<RestoredArchivedSkill> = Vec::new();
     let mut failed: Vec<RestoreArchivedSkillFailure> = Vec::new();
 
@@ -2133,9 +2115,7 @@ pub fn toggle_symlink(
     agent: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+    let _agent_lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     let skill = SkillService::find_in_cache(&state.skill_cache, &skill_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Skill not found: {skill_id}"))?;
@@ -2177,9 +2157,7 @@ pub fn batch_unlink_skills(
     skill_ids: Vec<String>,
     agent: String,
 ) -> Result<BatchUnlinkSkillsResult, String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+    let _agent_lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     if config::get_agent_skills_dir(&agent).is_none() {
         return Err(format!("Unknown agent: {agent}"));
     }
@@ -2264,9 +2242,7 @@ pub async fn merge_duplicates_to_ssot(
     state: State<'_, AppState>,
     skill_name: String,
 ) -> Result<(), String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+    let _agent_lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     SkillService::merge_duplicates_to_ssot(&skill_name, &state.skill_cache, &state.metadata)
         .map_err(|e| e.to_string())
 }
@@ -3302,6 +3278,7 @@ pub fn set_skill_starred(
     skill_id: String,
     starred: bool,
 ) -> Result<(), String> {
+    let _lease = state.acquire_local_lease().map_err(lease_command_error)?;
     let mut metadata = state.metadata.write().map_err(|e| e.to_string())?;
     metadata.set_starred(&skill_id, starred);
     metadata.save().map_err(|e| e.to_string())
@@ -3313,6 +3290,7 @@ pub fn set_skill_is_mine(
     skill_id: String,
     is_mine: bool,
 ) -> Result<(), String> {
+    let _lease = state.acquire_local_lease().map_err(lease_command_error)?;
     let mut metadata = state.metadata.write().map_err(|e| e.to_string())?;
     metadata.set_is_mine(&skill_id, is_mine);
     metadata.save().map_err(|e| e.to_string())
@@ -3324,9 +3302,7 @@ pub async fn create_skill(
     name: String,
     content: String,
 ) -> Result<InstalledSkill, String> {
-    let _agent_lease =
-        crate::persistence::agent_transaction::AgentLease::acquire(&config::get_app_config_dir())
-            .map_err(|e| e.to_string())?;
+    let _agent_lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     validate_skill_name(&name)?;
     validate_skill_directory(&name)?;
 
@@ -3564,6 +3540,7 @@ mod tests {
             test_cache_entry("agent:codex:local-skill", "local-skill", "agent"),
         ]);
         let mut lock = SkillLock {
+            extra: Default::default(),
             version: SUPPORTED_LOCK_VERSION,
             skills: Default::default(),
             dismissed: serde_json::json!({}),
@@ -3606,6 +3583,7 @@ mod tests {
             "ssot",
         )]);
         let mut lock = SkillLock {
+            extra: Default::default(),
             version: SUPPORTED_LOCK_VERSION,
             skills: Default::default(),
             dismissed: serde_json::json!({}),
@@ -3822,6 +3800,7 @@ mod tests {
 
     fn test_lock_entry(source: &str, commit_sha: &str) -> SkillLockEntry {
         SkillLockEntry {
+            extra: Default::default(),
             source: Some(source.to_string()),
             source_type: Some("github".to_string()),
             source_url: Some(format!("https://github.com/{source}")),

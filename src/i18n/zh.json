@@ -262,6 +262,7 @@
   "unsavedDialog": {
     "title": "未保存的更改",
     "description": "你有未保存的更改。切换到其他技能将丢弃这些编辑。",
+    "closeDescription": "你有未保存的更改。关闭该技能将丢弃这些编辑。",
     "discard": "丢弃",
     "keepEditing": "继续编辑"
   },

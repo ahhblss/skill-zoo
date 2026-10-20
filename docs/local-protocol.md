@@ -62,6 +62,7 @@ A directory is recognized as a skill when it contains a `SKILL.md`. Scans must s
 - Desktop is the source of truth for local protocol shape and semantics.
 - CLI changes must conform to the desktop-owned protocol and must not update fixtures to fit CLI implementation convenience.
 - Readers should tolerate missing optional fields.
+- Read-modify-write writers must preserve unknown optional fields (top-level and per-entry) so data written by newer producers survives older writers.
 - Desktop and CLI writers must refuse versioned files with schema versions newer than they support.
 - Adding optional fields usually does not require a schema version bump.
 - Removing fields, renaming fields, changing required fields, or changing write/read semantics requires a schema version bump or an explicit migration plan.

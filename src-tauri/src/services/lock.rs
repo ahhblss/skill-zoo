@@ -14,6 +14,8 @@ static LOCK_WRITE: Mutex<()> = Mutex::new(());
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillLockEntry {
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
     pub source: Option<String>,
     #[serde(default, rename = "sourceType")]
     pub source_type: Option<String>,
@@ -35,6 +37,8 @@ pub struct SkillLockEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillLock {
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
     #[serde(default = "default_version")]
     pub version: i32,
     #[serde(default)]
@@ -70,6 +74,7 @@ impl SkillLock {
         let path = config::get_agent_lock_file();
         if !path.exists() {
             return Ok(Self {
+                extra: BTreeMap::new(),
                 version: SUPPORTED_LOCK_VERSION,
                 skills: BTreeMap::new(),
                 dismissed: serde_json::Value::Object(Default::default()),

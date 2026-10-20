@@ -318,7 +318,7 @@ fn commit_agent_change(
     input: Option<(String, String, bool)>,
 ) -> Result<(AgentChangeResult, bool, agent_transaction::AgentLease), String> {
     let dir = config::get_app_config_dir();
-    let _lease = agent_transaction::AgentLease::acquire(&dir).map_err(|e| e.to_string())?;
+    let _lease = state.acquire_local_lease().map_err(|e| e.to_string())?;
     let mut registry =
         AgentRegistry::load_from(&dir.join("agents.json")).map_err(|e| e.to_string())?;
     let old = if let Some(id) = &requested_id {
@@ -604,7 +604,13 @@ mod tests {
             let state = state();
             let entry = SkillService::scan_skill_root(&skill, &root, Some(id)).unwrap();
             state.skill_cache.write().unwrap().upsert(entry.clone());
-            state.metadata.write().unwrap().set_starred(&entry.id, true);
+            {
+                // Metadata is disk-authoritative: persist the mark like the
+                // commands under test do.
+                let mut metadata = state.metadata.write().unwrap();
+                metadata.set_starred(&entry.id, true);
+                metadata.save().unwrap();
+            }
             let mut visible: std::collections::HashMap<String, bool> = config::agents()
                 .iter()
                 .map(|a| (a.id.clone(), false))
@@ -675,7 +681,11 @@ mod tests {
             std::fs::write(skill.join("SKILL.md"), "# Demo").unwrap();
             let entry =
                 SkillService::scan_skill_root(&skill, &root, Some(&added.agent_id)).unwrap();
-            state.metadata.write().unwrap().set_starred(&entry.id, true);
+            {
+                let mut metadata = state.metadata.write().unwrap();
+                metadata.set_starred(&entry.id, true);
+                metadata.save().unwrap();
+            }
             state.skill_cache.write().unwrap().upsert(entry.clone());
             let other = config::get_agent_skills_dir("codex").unwrap();
             std::fs::create_dir_all(&other).unwrap();

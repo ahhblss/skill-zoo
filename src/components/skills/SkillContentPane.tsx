@@ -39,6 +39,8 @@ interface SkillContentPaneProps {
   enableReadOnlyFileTree?: boolean;
   /** Hide the file-tree sidebar entirely (used by the create page, which only produces SKILL.md). */
   hideFileTree?: boolean;
+  /** Reports whether any auxiliary file has an unsaved draft, so the parent can gate leave paths. */
+  onUnsavedDraftsChange?: (hasUnsaved: boolean) => void;
 }
 
 const SPLIT_MIN = 20;
@@ -159,6 +161,7 @@ export const SkillContentPane = memo(function SkillContentPane({
   readOnly = false,
   enableReadOnlyFileTree = false,
   hideFileTree = false,
+  onUnsavedDraftsChange,
 }: SkillContentPaneProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -177,8 +180,13 @@ export const SkillContentPane = memo(function SkillContentPane({
   const [sidebarWidth, setSidebarWidth] = useState(208); // px, matches w-52
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const sidebarRowRef = useRef<HTMLDivElement>(null);
+  const sidebarPaneRef = useRef<HTMLDivElement>(null);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
-  const [fileEditContent, setFileEditContent] = useState<string | null>(null);
+  // One draft per auxiliary file: switching files must never discard edits
+  // made in another file.
+  const [fileDrafts, setFileDrafts] = useState<Record<string, string>>({});
+  const fileDraft = selectedFilePath !== null ? (fileDrafts[selectedFilePath] ?? null) : null;
   const [nodes, setNodes] = useState<SkillFileNode[]>([]);
   const [loadingDirPaths, setLoadingDirPaths] = useState<Set<string>>(() => new Set());
   const [errorDirPaths, setErrorDirPaths] = useState<Set<string>>(() => new Set());
@@ -205,6 +213,7 @@ export const SkillContentPane = memo(function SkillContentPane({
   useEffect(() => {
     setNodes([]);
     setSelectedFilePath(null);
+    setFileDrafts({});
     loadingDirPathsRef.current = new Set();
     setLoadingDirPaths(new Set());
     setErrorDirPaths(new Set());
@@ -232,10 +241,16 @@ export const SkillContentPane = memo(function SkillContentPane({
     }
   }, [nodes, selectedFilePath]);
 
-  // ── Reset local edit content when switching files ──
+  // ── Report unsaved auxiliary drafts to the parent for leave protection ──
+  const onUnsavedDraftsChangeRef = useRef(onUnsavedDraftsChange);
   useEffect(() => {
-    setFileEditContent(null);
-  }, [selectedFilePath]);
+    onUnsavedDraftsChangeRef.current = onUnsavedDraftsChange;
+  });
+  const hasUnsavedDrafts = Object.keys(fileDrafts).length > 0;
+  useEffect(() => {
+    onUnsavedDraftsChangeRef.current?.(hasUnsavedDrafts);
+    return () => onUnsavedDraftsChangeRef.current?.(false);
+  }, [hasUnsavedDrafts]);
 
   // ── Non-SKILL.md file content ──
   const {
@@ -265,22 +280,38 @@ export const SkillContentPane = memo(function SkillContentPane({
   // ── Routing: what actually drives the editor ──
   const displayContent = isSkillMdActive
     ? (previewContent ?? content)
-    : (fileEditContent ?? fileData ?? "");
-  const editableContent = isSkillMdActive ? content : (fileEditContent ?? fileData ?? "");
+    : (fileDraft ?? fileData ?? "");
+  const editableContent = isSkillMdActive ? content : (fileDraft ?? fileData ?? "");
   const handleChange = readOnly
     ? () => {}
     : isSkillMdActive
       ? onChange
-      : (v: string) => setFileEditContent(v);
-  const isDirty = !isSkillMdActive && fileEditContent !== null && fileEditContent !== fileData;
+      : (v: string) => {
+          if (selectedFilePath !== null) {
+            setFileDrafts((prev) => ({ ...prev, [selectedFilePath]: v }));
+          }
+        };
+  const isDirty = !isSkillMdActive && fileDraft !== null && fileDraft !== fileData;
 
   const handleFileSave = useCallback(() => {
     if (!skillId || !selectedFilePath || !isDirty || saveFileMutation.isPending) return;
+    const submittedPath = selectedFilePath;
+    const submittedContent = fileDraft!;
     saveFileMutation.mutate(
-      { skillId, path: selectedFilePath, content: fileEditContent! },
-      { onSuccess: () => setFileEditContent(null) },
+      { skillId, path: submittedPath, content: submittedContent },
+      {
+        onSuccess: () => {
+          // Only confirm the submitted revision; keep newer edits typed
+          // while the save was in flight.
+          setFileDrafts((prev) => {
+            if (prev[submittedPath] !== submittedContent) return prev;
+            const { [submittedPath]: _confirmed, ...rest } = prev;
+            return rest;
+          });
+        },
+      },
     );
-  }, [skillId, selectedFilePath, isDirty, fileEditContent, saveFileMutation]);
+  }, [skillId, selectedFilePath, isDirty, fileDraft, saveFileMutation]);
 
   const handleLoadChildren = useCallback(
     async (node: SkillFileNode) => {
@@ -355,6 +386,15 @@ export const SkillContentPane = memo(function SkillContentPane({
   // ── Sidebar resize drag ──
   const SIDEBAR_MIN = 120;
   const SIDEBAR_MAX = 400;
+  const toggleSidebar = useCallback(() => {
+    const next = !sidebarOpen;
+    setSidebarOpen(next);
+    // Collapsing with focus inside the tree would strand it on hidden
+    // content; move it back to the toggle.
+    if (!next && sidebarPaneRef.current?.contains(document.activeElement)) {
+      sidebarToggleRef.current?.focus();
+    }
+  }, [sidebarOpen]);
   const onSidebarDividerDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setSidebarDragging(true);
@@ -416,7 +456,8 @@ export const SkillContentPane = memo(function SkillContentPane({
         {/* Sidebar toggle */}
         {!fileTreeDisabled && (
           <button
-            onClick={() => setSidebarOpen((v) => !v)}
+            ref={sidebarToggleRef}
+            onClick={toggleSidebar}
             title={sidebarOpen ? t("skillFiles.hideSidebar") : t("skillFiles.showSidebar")}
             className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
           >
@@ -511,6 +552,8 @@ export const SkillContentPane = memo(function SkillContentPane({
             clipped the outgoing translate. Disabled while dragging so resizing
             keeps up with the pointer. */}
         <div
+          ref={sidebarPaneRef}
+          inert={!sidebarOpen}
           className={cn(
             "h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none",
             sidebarDragging && "!duration-0",

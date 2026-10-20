@@ -10,11 +10,12 @@
       "skillFolderHash": "sha256-demo",
       "installedAt": "2026-01-02T03:04:05Z",
       "updatedAt": "2026-01-03T03:04:05Z",
-      "commitSha": "abc123"
+      "commitSha": "abc123",
+      "futureOptional": "keep-me"
     }
   },
   "dismissed": {
     "demo": true
-  }
+  },
+  "futureTop": "keep-me"
 }
-

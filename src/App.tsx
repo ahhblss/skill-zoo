@@ -113,7 +113,24 @@ export default function App() {
     null,
   );
   const detailOverlayRef = useRef<HTMLDivElement>(null);
-  const editor = useEditorState();
+  // Unsaved auxiliary file drafts reported by SkillContentPane; the ref feeds
+  // the switch confirm, the state drives archive/close protection.
+  const auxDraftsDirtyRef = useRef(false);
+  const [auxDraftsDirty, setAuxDraftsDirty] = useState(false);
+  const handleUnsavedDraftsChange = useCallback((hasUnsaved: boolean) => {
+    auxDraftsDirtyRef.current = hasUnsaved;
+    setAuxDraftsDirty(hasUnsaved);
+  }, []);
+  const [pendingClose, setPendingClose] = useState(false);
+  const editor = useEditorState(auxDraftsDirtyRef);
+
+  const handleBackFromSkill = useCallback(() => {
+    if (editor.dirty || auxDraftsDirtyRef.current) {
+      setPendingClose(true);
+      return;
+    }
+    editor.closeEditor();
+  }, [editor]);
   const updateMutation = useUpdateSkill();
   const removeMutation = useRemoveSkill();
   const archiveMutation = useArchiveSkill();
@@ -189,7 +206,7 @@ export default function App() {
   };
 
   const handleArchive = () => {
-    if (!editor.skillId || editor.dirty) return;
+    if (!editor.skillId || editor.dirty || auxDraftsDirty) return;
     archiveMutation.mutate(editor.skillId, {
       onSuccess: () => {
         editor.closeEditor();
@@ -273,7 +290,7 @@ export default function App() {
           isError={editor.contentError}
           content={editor.localContent}
           onChange={editor.updateContent}
-          onBack={editor.closeEditor}
+          onBack={handleBackFromSkill}
           onUpdate={handleUpdate}
           onRemove={handleRemove}
           onArchive={handleArchive}
@@ -281,10 +298,11 @@ export default function App() {
           updatePending={updateMutation.isPending && updateMutation.variables === editor.skillId}
           removePending={removeMutation.isPending}
           archivePending={archiveMutation.isPending}
-          archiveDisabled={editor.dirty}
+          archiveDisabled={editor.dirty || auxDraftsDirty}
           onSave={editor.save}
           savePending={editor.savePending}
           dirty={editor.dirty}
+          onUnsavedDraftsChange={handleUnsavedDraftsChange}
         />
       );
     }
@@ -346,6 +364,36 @@ export default function App() {
                 {t("unsavedDialog.keepEditing")}
               </Button>
               <Button variant="destructive" size="sm" onClick={editor.confirmSwitch}>
+                {t("unsavedDialog.discard")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {pendingClose && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setPendingClose(false);
+          }}
+        >
+          <DialogContent className="sm:max-w-[380px]">
+            <DialogHeader>
+              <DialogTitle>{t("unsavedDialog.title")}</DialogTitle>
+              <DialogDescription>{t("unsavedDialog.closeDescription")}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={() => setPendingClose(false)}>
+                {t("unsavedDialog.keepEditing")}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  setPendingClose(false);
+                  editor.closeEditor();
+                }}
+              >
                 {t("unsavedDialog.discard")}
               </Button>
             </DialogFooter>

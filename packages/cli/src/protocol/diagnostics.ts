@@ -7,7 +7,7 @@ import { assertWritableSchema, readArchiveManifest, readCache, readExternalImpor
 import type { ArchivedSkill, InstalledSkill } from "./types.js";
 import { CliError, messageFromError } from "../lib/errors.js";
 import {
-  createAgentLink,
+  replaceAgentLink,
   isSymlinkOrJunction,
   pathExists,
   pathStartsWith,
@@ -447,7 +447,7 @@ async function planAndApplyLinkFixes(
         action.message = "Cannot replace agent link because the expected target is missing.";
         action.error = `Missing target: ${check.expected}`;
       } else if (!dryRun) {
-        await createAgentLink(check.path, check.expected);
+        await replaceAgentLink(check.path, check.expected);
       }
     } catch (error) {
       action.status = "failed";

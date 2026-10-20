@@ -37,6 +37,7 @@ fn test_refuses_to_write_future_lock_version() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("lock.json");
     let lock = SkillLock {
+        extra: Default::default(),
         version: 4,
         skills: BTreeMap::new(),
         dismissed: serde_json::json!({}),

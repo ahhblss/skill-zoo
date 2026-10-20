@@ -676,6 +676,17 @@ impl SkillService {
     //  Write path: rebuild cache from filesystem truth
     // ──────────────────────────────────────────────
 
+    /// Replace the in-memory metadata with the disk state so refreshes observe
+    /// user marks committed by the CLI after this desktop session started.
+    fn reload_metadata(metadata: &RwLock<MetadataStore>) -> Result<(), AppError> {
+        let fresh = MetadataStore::load()?;
+        let mut m = metadata
+            .write()
+            .map_err(|e| AppError::Parse(format!("Metadata lock: {e}")))?;
+        *m = fresh;
+        Ok(())
+    }
+
     /// Rebuild the skill cache from filesystem + CLI + lock file.
     /// Returns skills with metadata merged.
     pub async fn rebuild_cache(
@@ -706,6 +717,7 @@ impl SkillService {
         new_cache.replace_all(entries);
         new_cache.save()?;
 
+        Self::reload_metadata(metadata)?;
         let m = metadata
             .read()
             .map_err(|e| AppError::Parse(format!("Metadata lock: {e}")))?;
@@ -740,6 +752,7 @@ impl SkillService {
         commit_cache_entries(&mut current, entries, SkillCache::save)?;
         drop(current);
 
+        Self::reload_metadata(metadata)?;
         Self::read_all_skills(cache, metadata)
     }
 
@@ -2159,10 +2172,44 @@ impl SkillService {
         let ssot_dir = config::get_agents_skills_dir();
         let dest_dir = ssot_dir.join(skill_name);
 
-        // Copy to SSOT if not already there
+        // Verify live files before deleting any original; cache hashes may be stale.
+        let expected_hash = Self::compute_content_hash(source_path)
+            .ok_or_else(|| AppError::BadRequest("Cannot verify merge source".into()))?;
+        for entry in &entries {
+            let home = entry
+                .home_path
+                .as_deref()
+                .ok_or_else(|| AppError::BadRequest("Cannot verify merge source".into()))?;
+            if !std::path::Path::new(home).join("SKILL.md").is_file()
+                || Self::compute_content_hash(home).as_ref() != Some(&expected_hash)
+            {
+                return Err(AppError::BadRequest(
+                    "Merge sources changed; refresh and retry".into(),
+                ));
+            }
+        }
+        if std::fs::symlink_metadata(&dest_dir).is_ok()
+            && (!entries.iter().any(|e| {
+                e.origin == "ssot"
+                    && e.home_path
+                        .as_deref()
+                        .is_some_and(|p| std::path::Path::new(p) == dest_dir)
+            }) || dest_dir.is_symlink()
+                || !dest_dir.join("SKILL.md").is_file())
+        {
+            return Err(AppError::BadRequest(
+                "Merge destination is already occupied".into(),
+            ));
+        }
         if !dest_dir.exists() {
             std::fs::create_dir_all(&ssot_dir).map_err(|e| crate::error::io(&ssot_dir, e))?;
             Self::copy_dir_recursive(std::path::Path::new(source_path), &dest_dir)?;
+        }
+        if Self::compute_content_hash(&dest_dir.to_string_lossy()).as_ref() != Some(&expected_hash)
+        {
+            return Err(AppError::BadRequest(
+                "Cannot verify merge destination".into(),
+            ));
         }
 
         // Phase 1: Remove original non-SSOT directories + their symlinks
@@ -2219,11 +2266,11 @@ impl SkillService {
                 is_mine: old_ids.iter().any(|id| m.get(id).is_mine),
             };
             // Remove old IDs and insert the new one (only if non-default)
-            if merged.starred || merged.is_mine {
-                m.entries.insert(new_id, merged);
-            }
             for old_id in &old_ids {
                 m.remove(old_id);
+            }
+            if merged.starred || merged.is_mine {
+                m.entries.insert(new_id, merged);
             }
             m.save()?;
         }
@@ -2861,6 +2908,7 @@ mod tests {
     fn discoverable_classification_reports_available_when_cache_is_empty() {
         let cache = SkillCache::empty();
         let lock = SkillLock {
+            extra: Default::default(),
             version: SUPPORTED_LOCK_VERSION,
             skills: Default::default(),
             dismissed: serde_json::json!({}),
@@ -2889,6 +2937,7 @@ mod tests {
             "skills",
         )]);
         let mut lock = SkillLock {
+            extra: Default::default(),
             version: SUPPORTED_LOCK_VERSION,
             skills: Default::default(),
             dismissed: serde_json::json!({}),
@@ -2935,6 +2984,7 @@ mod tests {
             "repo",
         )]);
         let mut lock = SkillLock {
+            extra: Default::default(),
             version: SUPPORTED_LOCK_VERSION,
             skills: Default::default(),
             dismissed: serde_json::json!({}),
@@ -2960,6 +3010,7 @@ mod tests {
         external.origin = "external".to_string();
         let cache = SkillCache::from_entries(vec![external]);
         let lock = SkillLock {
+            extra: Default::default(),
             version: SUPPORTED_LOCK_VERSION,
             skills: Default::default(),
             dismissed: serde_json::json!({}),
@@ -3114,6 +3165,7 @@ mod tests {
 
     fn test_lock_entry(source: &str, skill_path: &str) -> SkillLockEntry {
         SkillLockEntry {
+            extra: Default::default(),
             source: Some(source.to_string()),
             source_type: Some("github".to_string()),
             source_url: Some(format!("https://github.com/{source}")),
@@ -3258,6 +3310,31 @@ mod tests {
                 err.to_string().contains("exceeding the limit"),
                 "expected scale-limit rejection, got: {err}"
             );
+        });
+    }
+
+    #[test]
+    fn reload_metadata_pulls_disk_state_into_memory() {
+        let tmp = tempfile::tempdir().unwrap();
+        config::with_test_home(tmp.path(), || {
+            // Simulate the CLI committing a user mark after desktop started.
+            MetadataStore {
+                entries: HashMap::from([(
+                    "ssot:demo".to_string(),
+                    SkillMetadata {
+                        starred: true,
+                        is_mine: false,
+                    },
+                )]),
+            }
+            .save()
+            .unwrap();
+
+            let metadata = RwLock::new(MetadataStore {
+                entries: HashMap::new(),
+            });
+            SkillService::reload_metadata(&metadata).unwrap();
+            assert!(metadata.read().unwrap().get("ssot:demo").starred);
         });
     }
 }

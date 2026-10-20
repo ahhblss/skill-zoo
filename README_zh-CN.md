@@ -51,7 +51,7 @@ npm i -g skill-zoo
 skill-zoo --help
 
 skill-zoo list           # 列出已安装技能
-skill-zoo doctor --fix   # 诊断并修复常见问题
+skill-zoo doctor fix     # 诊断并修复常见问题
 skill-zoo wui            # 启动本地 Web 管理界面
 ```
 
@@ -85,7 +85,7 @@ chmod +x Skill-Zoo-*-Linux-*.AppImage
 ## 😇 信任与安全
 
 - **代码可见**：全部源码开源，构建过程由 GitHub Actions 自动完成，任何人都可以审计
-- **按需联网**：不后台偷跑，只在用户主动触发操作时请求 GitHub / skills.sh API
+- **按需联网**：不后台轮询，只在用户主动触发操作时请求 GitHub / skills.sh API；例外是应用自身的更新检查（存在缓存更新时启动检查一次，设置页内每日最多一次）
 - **操作经你确认**：所有涉及真实文件的操作（删除、移动、覆盖）都会弹出确认，由你拍板
 
 ## 💡 贡献代码

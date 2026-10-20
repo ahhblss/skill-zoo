@@ -42,6 +42,7 @@ interface SkillDetailProps {
   savePending?: boolean;
   dirty?: boolean;
   readOnly?: boolean;
+  onUnsavedDraftsChange?: (hasUnsaved: boolean) => void;
 }
 
 export function SkillDetail({
@@ -68,6 +69,7 @@ export function SkillDetail({
   savePending,
   dirty,
   readOnly,
+  onUnsavedDraftsChange,
 }: SkillDetailProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<ContentTab>("overview");
@@ -245,6 +247,7 @@ export function SkillDetail({
           dirty={dirty}
           readOnly={contentReadOnly}
           enableReadOnlyFileTree={isExternalImport && !readOnly}
+          onUnsavedDraftsChange={onUnsavedDraftsChange}
         />
       )}
 

@@ -97,6 +97,7 @@ fn test_classify_discoverable_skill_distinguishes_installed_and_conflict() {
     installed.repo_name = Some("repo".to_string());
     let cache = SkillCache::from_entries(vec![installed]);
     let mut lock = SkillLock {
+        extra: Default::default(),
         version: 3,
         skills: Default::default(),
         dismissed: serde_json::json!({}),
@@ -167,6 +168,7 @@ fn test_classify_discoverable_skill_treats_multiple_same_directory_entries_as_co
         make_cache_entry("agent:codex:demo", "demo", "demo"),
     ]);
     let lock = SkillLock {
+        extra: Default::default(),
         version: 3,
         skills: Default::default(),
         dismissed: serde_json::json!({}),
@@ -183,6 +185,7 @@ fn test_classify_discoverable_skill_treats_multiple_same_directory_entries_as_co
 #[test]
 fn test_classify_discoverable_skill_treats_missing_and_local_entries_conservatively() {
     let lock = SkillLock {
+        extra: Default::default(),
         version: 3,
         skills: Default::default(),
         dismissed: serde_json::json!({}),

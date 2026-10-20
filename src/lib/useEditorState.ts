@@ -1,7 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useSkillContent, useSaveSkillContent, useInstalledSkills } from "@/hooks/useSkills";
 
-export function useEditorState() {
+/**
+ * Tracks unsaved state the editor itself cannot see (auxiliary file drafts
+ * owned by SkillContentPane) so skill switches confirm before discarding it.
+ */
+export function useEditorState(externalUnsaved?: { current: boolean }) {
   const [open, setOpen] = useState(false);
   const [skillId, setSkillId] = useState<string>("");
   const [directory, setDirectory] = useState<string>("");
@@ -9,6 +13,9 @@ export function useEditorState() {
   const [localContent, setLocalContent] = useState<string>("");
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
+  // Latest editor text, mirrored synchronously so a save completion can tell
+  // whether the user typed past the submitted revision while it was in flight.
+  const contentRef = useRef("");
   const [pendingOpen, setPendingOpen] = useState<{
     id: string;
     dir: string;
@@ -43,7 +50,7 @@ export function useEditorState() {
 
   const openEditor = useCallback(
     (id: string, dir: string, name: string) => {
-      if (dirtyRef.current) {
+      if (dirtyRef.current || externalUnsaved?.current) {
         setPendingOpen({ id, dir, name });
         return;
       }
@@ -51,10 +58,11 @@ export function useEditorState() {
       setDirectory(dir);
       setSkillName(name);
       setLocalContent("");
+      contentRef.current = "";
       markDirty(false);
       setOpen(true);
     },
-    [markDirty],
+    [markDirty, externalUnsaved],
   );
 
   const confirmSwitch = useCallback(() => {
@@ -65,6 +73,7 @@ export function useEditorState() {
     setDirectory(dir);
     setSkillName(name);
     setLocalContent("");
+    contentRef.current = "";
     markDirty(false);
     setOpen(true);
   }, [pendingOpen, markDirty]);
@@ -77,18 +86,27 @@ export function useEditorState() {
     setOpen(false);
     markDirty(false);
     setLocalContent("");
+    contentRef.current = "";
   }, [markDirty]);
 
   const save = useCallback(() => {
     if (!dirty || saveMutation.isPending) return;
+    const submitted = localContent;
     saveMutation.mutate(
-      { directory, skillId, content: localContent },
-      { onSuccess: () => markDirty(false) },
+      { directory, skillId, content: submitted },
+      {
+        onSuccess: () => {
+          // Only confirm the revision we submitted; keep drafts typed
+          // while the save was in flight.
+          if (contentRef.current === submitted) markDirty(false);
+        },
+      },
     );
   }, [directory, skillId, localContent, dirty, saveMutation, markDirty]);
 
   const updateContent = useCallback(
     (newContent: string) => {
+      contentRef.current = newContent;
       setLocalContent(newContent);
       markDirty(true);
     },

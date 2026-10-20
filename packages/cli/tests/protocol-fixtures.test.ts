@@ -10,6 +10,7 @@ import {
   readCache,
   readLock,
   readMetadata,
+  writeLock,
 } from "../src/protocol/store.js";
 import { makeTempHome } from "./helpers.js";
 
@@ -50,6 +51,24 @@ describe("desktop local protocol fixtures", () => {
       sourcePath: "/Users/example/private-skills/skills/demo",
       directory: "skills/demo",
     });
+  });
+
+  it("preserves unknown lock fields across a read-write roundtrip", async () => {
+    const home = await makeTempHome();
+    const paths = getPaths(home);
+    await copyFixture("lock-v3-full.json", paths.agentLockFile);
+    const fixtureBefore = await fs.readFile(paths.agentLockFile, "utf8");
+
+    const lock = await readLock(home);
+    await writeLock(home, lock);
+
+    const reread = await readLock(home);
+    const root = reread as unknown as Record<string, unknown>;
+    const entry = reread.skills.demo as Record<string, unknown> | undefined;
+    expect(root["futureTop"]).toBe("keep-me");
+    expect(entry?.["futureOptional"]).toBe("keep-me");
+    // Fixtures represent desktop protocol state and must never be rewritten.
+    expect(await fs.readFile(paths.agentLockFile, "utf8")).toBe(fixtureBefore);
   });
 
   it("applies defaults for minimal current fixtures", async () => {

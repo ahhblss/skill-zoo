@@ -114,10 +114,31 @@ export async function pathStartsWith(candidate: string, root: string): Promise<b
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export async function createAgentLink(linkPath: string, targetPath: string): Promise<void> {
+export async function assertAgentLinkAvailable(linkPath: string, targetPath: string): Promise<void> {
+  const existing = await lstatSafe(linkPath);
+  if (!existing) return;
+  if (await isSymlinkOrJunction(linkPath) && await pathsEqual(linkPath, targetPath)) return;
+  throw new Error(`Cannot create agent link: destination already exists at ${linkPath}`);
+}
+
+export async function createAgentLink(linkPath: string, targetPath: string): Promise<boolean> {
+  await assertAgentLinkAvailable(linkPath, targetPath);
+  if (await lstatSafe(linkPath)) return false;
   await ensureDir(path.dirname(linkPath));
-  await removePath(linkPath);
   await fs.symlink(targetPath, linkPath, process.platform === "win32" ? "junction" : "dir");
+  return true;
+}
+
+/**
+ * Replace an existing symlink with one pointing at targetPath. Callers must
+ * have verified the path is a symlink (never an entity directory) — this is
+ * the repair path for invalid links, not a general overwrite primitive.
+ */
+export async function replaceAgentLink(linkPath: string, targetPath: string): Promise<boolean> {
+  if (await isSymlinkOrJunction(linkPath)) {
+    await removePath(linkPath);
+  }
+  return createAgentLink(linkPath, targetPath);
 }
 
 /** Normalize path separators to forward slashes for cross-platform consistency

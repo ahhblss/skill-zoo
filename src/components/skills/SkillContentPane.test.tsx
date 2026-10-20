@@ -1,9 +1,13 @@
 import "@/i18n";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { invoke } from "@tauri-apps/api/core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillContentPane } from "./SkillContentPane";
 import { createTestQueryClient } from "@/test/utils";
+
+vi.mock("@tauri-apps/api/core");
 
 /**
  * Why this test exists (not a tautology):
@@ -87,5 +91,107 @@ describe("SkillContentPane sidebar animation", () => {
 
     expect(translated?.className).toMatch(/\bopacity-100(\s|$)/);
     expect(translated?.className).not.toContain("-translate-x-full");
+  });
+});
+
+/**
+ * Regression (review S6): auxiliary file drafts used to live in a single slot
+ * that was cleared on every file switch, silently discarding edits. Drafts are
+ * now per-file and reported to the parent for leave protection.
+ */
+const mockFileNodes = [
+  { name: "SKILL.md", path: "SKILL.md", isDir: false, isSkillMd: true },
+  { name: "README.md", path: "README.md", isDir: false, isSkillMd: false },
+];
+
+function renderEditablePane() {
+  const onUnsavedDraftsChange = vi.fn();
+  const utils = render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <SkillContentPane
+        content=""
+        onChange={() => {}}
+        activeTab="edit"
+        onTabChange={() => {}}
+        directory="/path/to/skill-1"
+        skillId="skill-1"
+        onUnsavedDraftsChange={onUnsavedDraftsChange}
+      />
+    </QueryClientProvider>,
+  );
+  return { ...utils, onUnsavedDraftsChange };
+}
+
+describe("SkillContentPane auxiliary drafts", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockImplementation((_cmd, args) => {
+      const cmd = _cmd as string;
+      if (cmd === "list_skill_files") return Promise.resolve(mockFileNodes);
+      if (cmd === "read_skill_text") {
+        return Promise.resolve(
+          (args as { relativePath: string }).relativePath === "README.md"
+            ? "original readme"
+            : "# skill",
+        );
+      }
+      return Promise.resolve(null);
+    });
+  });
+
+  it("keeps a file's draft when switching to another file and back", async () => {
+    const user = userEvent.setup();
+    const { onUnsavedDraftsChange } = renderEditablePane();
+
+    const readmeButton = await screen.findByRole("button", { name: "README.md" });
+    await user.click(readmeButton);
+    const editor = await screen.findByLabelText("Edit");
+    await user.clear(editor);
+    await user.type(editor, "draft text");
+
+    await user.click(screen.getByRole("button", { name: "SKILL.md" }));
+    await user.click(screen.getByRole("button", { name: "README.md" }));
+
+    expect(screen.getByLabelText("Edit")).toHaveValue("draft text");
+    expect(onUnsavedDraftsChange).toHaveBeenCalledWith(true);
+  });
+
+  it("reports no unsaved drafts after the edited file is saved", async () => {
+    const user = userEvent.setup();
+    const { onUnsavedDraftsChange } = renderEditablePane();
+
+    const readmeButton = await screen.findByRole("button", { name: "README.md" });
+    await user.click(readmeButton);
+    const editor = await screen.findByLabelText("Edit");
+    await user.clear(editor);
+    await user.type(editor, "saved text");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onUnsavedDraftsChange).toHaveBeenCalledWith(false));
+  });
+});
+
+describe("SkillContentPane collapsed sidebar focus", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockImplementation((_cmd) => {
+      if (_cmd === "list_skill_files") return Promise.resolve(mockFileNodes);
+      return Promise.resolve(null);
+    });
+  });
+
+  it("isolates the collapsed file tree from the accessibility tree", async () => {
+    const user = userEvent.setup();
+    const { container } = renderEditablePane();
+
+    await screen.findByRole("button", { name: "README.md" });
+    const paneContainer = findWidthContainer(container);
+    expect(paneContainer).toBeTruthy();
+    expect(paneContainer).not.toHaveAttribute("inert");
+
+    await user.click(screen.getByRole("button", { name: "Hide file sidebar" }));
+
+    // jsdom does not enforce inert semantics, but the attribute is the
+    // browser contract (Safari 16.4 floor supports it) that removes the
+    // collapsed tree from the tab order — the review found it missing.
+    expect(paneContainer).toHaveAttribute("inert");
   });
 });

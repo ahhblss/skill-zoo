@@ -1037,6 +1037,7 @@ impl CliService {
                 lock.skills.insert(
                     name.clone(),
                     SkillLockEntry {
+                        extra: Default::default(),
                         source: Some(source.clone()),
                         source_type: Some("github".into()),
                         source_url: Some(source_url.clone()),
@@ -1328,6 +1329,7 @@ mod tests {
     #[test]
     fn update_repo_info_uses_effective_source_url_fallback() {
         let entry = SkillLockEntry {
+            extra: Default::default(),
             source: Some("owner/repo".to_string()),
             source_type: Some("github".to_string()),
             source_url: None,
@@ -1354,6 +1356,7 @@ mod tests {
     #[test]
     fn update_repo_info_preserves_missing_ref_as_default_branch() {
         let entry = SkillLockEntry {
+            extra: Default::default(),
             source: Some("owner/repo".to_string()),
             source_type: Some("github".to_string()),
             source_url: None,
@@ -2013,6 +2016,7 @@ mod tests {
         commit_sha: Option<&str>,
     ) -> SkillLockEntry {
         SkillLockEntry {
+            extra: Default::default(),
             source: Some(source.to_string()),
             source_type: Some("github".to_string()),
             source_url: Some(format!("https://github.com/{source}")),

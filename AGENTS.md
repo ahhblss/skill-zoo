@@ -24,7 +24,7 @@
 
 ## Branch Canonicality
 
-`next/own-protocol` is the canonical development line, based on `main` (`v0.3.55`). `next/curated` is the 0.3.56 compatibility experiment (`v0.3.56-beta.4` local tag) and `next/verified-baselines` is the frozen 0.3.56 prerelease experiment; both are reference-only. `main` is the stable line. Review own-protocol from `main`/`v0.3.55`.
+`main` is the canonical development line; CI runs on every push and PR to it. `next/own-protocol` has been fast-forwarded back into `main`. `next/curated` is the 0.3.56 compatibility experiment (`v0.3.56-beta.4` local tag) and `next/verified-baselines` is the frozen 0.3.56 prerelease experiment; both are reference-only.
 
 ## What This Project Is
 

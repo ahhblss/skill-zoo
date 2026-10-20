@@ -20,6 +20,19 @@ fn test_desktop_reads_current_protocol_fixtures() {
     assert_eq!(lock_entry.branch.as_deref(), Some("main"));
     assert_eq!(lock_entry.skill_path.as_deref(), Some("skills/demo"));
     assert_eq!(lock_entry.commit_sha.as_deref(), Some("abc123"));
+    // Unknown optional fields must survive parsing for read-modify-write
+    // writers so future producers' data is not dropped.
+    assert_eq!(
+        lock.extra.get("futureTop").and_then(|v| v.as_str()),
+        Some("keep-me")
+    );
+    assert_eq!(
+        lock_entry
+            .extra
+            .get("futureOptional")
+            .and_then(|v| v.as_str()),
+        Some("keep-me")
+    );
 
     assert_eq!(manifest.version, 1);
     let archived = manifest.skills.get("demo-abc123").expect("archive entry");

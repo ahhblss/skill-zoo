@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { CliError } from "../lib/errors.js";
 import {
   createAgentLink,
+  assertAgentLinkAvailable,
   isSymlinkOrJunction,
   lstatSafe,
   normalizePath,
@@ -324,6 +325,9 @@ export async function importExternalSkills(
         await validateSourceForImport(home, absSource, sourcePath);
         const importId = resolvedToId.get(absSource) ?? generateImportId(absSource);
         const directory = path.basename(absSource);
+        for (const { dir } of allAgentDirs) {
+          await assertAgentLinkAvailable(path.join(dir, agentLinkName(directory)), absSource);
+        }
 
         for (const { dir: agentDir } of allAgentDirs) {
           const linkPath = path.join(agentDir, agentLinkName(directory));
@@ -351,11 +355,15 @@ export async function importExternalSkills(
   try {
     for (const sourcePath of sourcePaths) {
       const absSource = path.resolve(sourcePath);
+      const itemLinks: string[] = [];
       try {
         await validateSourceForImport(home, absSource, sourcePath);
 
         const importId = resolvedToId.get(absSource) ?? generateImportId(absSource);
         const directory = path.basename(absSource);
+        for (const { dir } of allAgentDirs) {
+          await assertAgentLinkAvailable(path.join(dir, agentLinkName(directory)), absSource);
+        }
         const now = Math.floor(Date.now() / 1000);
 
         const entry: ExternalImportEntry = {
@@ -366,17 +374,18 @@ export async function importExternalSkills(
           updatedAt: now,
         };
 
-        existingImports.imports[importId] = entry;
-        newImportIds.push(importId);
-
         for (const { dir: agentDir } of allAgentDirs) {
           const linkPath = path.join(agentDir, agentLinkName(directory));
-          await createAgentLink(linkPath, absSource);
-          createdLinks.push(linkPath);
+          if (await createAgentLink(linkPath, absSource)) itemLinks.push(linkPath);
         }
 
+        existingImports.imports[importId] = entry;
+        resolvedToId.set(absSource, importId);
+        newImportIds.push(importId);
+        createdLinks.push(...itemLinks);
         added.push(importId);
       } catch (error) {
+        await Promise.all(itemLinks.map((link) => removeAgentLink(link)));
         failed.push({ ref: sourcePath, error: error instanceof Error ? error.message : String(error) });
       }
     }

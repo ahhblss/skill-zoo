@@ -52,7 +52,7 @@ npm i -g skill-zoo
 skill-zoo --help
 
 skill-zoo list           # List installed skills
-skill-zoo doctor --fix   # Diagnose and fix common issues
+skill-zoo doctor fix     # Diagnose and fix common issues
 skill-zoo wui            # Start the local Web UI
 ```
 
@@ -86,7 +86,7 @@ chmod +x Skill-Zoo-*-Linux-*.AppImage
 ## 😇 Trust & Security
 
 - **Auditable Code**: 100% open source. Every build runs on GitHub Actions for anyone to inspect.
-- **Connects On Demand**: No background polling. Network only fires on browse or install.
+- **Connects On Demand**: No background polling. Network only fires on browse or install, plus an occasional automatic check for app updates (at launch when a cached update exists, and in Settings at most once per day).
 - **You Stay in Control**: Any operation that touches real files (delete, move, overwrite) asks for confirmation first.
 
 ## 💡 Contributing
