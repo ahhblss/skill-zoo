@@ -6,10 +6,10 @@
     "description": "Public repository for Agent Skills"
   },
   {
-    "owner": "agentbay-ai",
-    "name": "agentbay-skills",
+    "owner": "HKUSTDial",
+    "name": "Supervisor-Skills",
     "branch": "main",
-    "description": "A collection of skills for AgentBay"
+    "description": "Research skills from a PhD advisor's decade of experience: idea evaluation, literature survey, paper drafting, figures, submission review, and rebuttal"
   },
   {
     "owner": "addyosmani",
