@@ -561,18 +561,11 @@ impl SkillService {
 
     /// Construct the canonical skill ID string used across cache and duplicate detection.
     /// Must match the logic in `scan_single_skill`.
-    fn make_skill_id(
-        origin: &str,
-        dir: &str,
-        repo_owner: &Option<String>,
-        repo_name: &Option<String>,
-        agent_id: Option<&str>,
-    ) -> String {
+    /// Identity is anchored to the installation directory; provenance must not
+    /// leak into the ID, or metadata detaches when the source drifts.
+    fn make_skill_id(origin: &str, dir: &str, agent_id: Option<&str>) -> String {
         if origin == "ssot" {
-            match (repo_owner.as_deref(), repo_name.as_deref()) {
-                (Some(owner), Some(repo)) => format!("repo:{owner}/{repo}:{dir}"),
-                _ => format!("ssot:{dir}"),
-            }
+            format!("ssot:{dir}")
         } else {
             format!(
                 "agent:{aid}:{dir}",
@@ -1463,13 +1456,7 @@ impl SkillService {
         let now = chrono::Utc::now().timestamp();
         let (installed_at, updated_at) =
             Self::resolve_timestamps(lock_entry, home_path.as_deref().unwrap_or(skill_dir), now);
-        let id = Self::make_skill_id(
-            origin,
-            skill_dir,
-            &repo_owner,
-            &repo_name,
-            home_agent.as_deref(),
-        );
+        let id = Self::make_skill_id(origin, skill_dir, home_agent.as_deref());
         let apps = Self::detect_agents(skill_dir, &home_path);
 
         Ok(SkillCacheEntry {
@@ -1658,7 +1645,7 @@ impl SkillService {
         };
 
         let origin = if agent_id.is_some() { "agent" } else { "ssot" };
-        let id = Self::make_skill_id(origin, &relative_dir, &repo_owner, &repo_name, agent_id);
+        let id = Self::make_skill_id(origin, &relative_dir, agent_id);
         let home_path = skill_root
             .to_str()
             .map(crate::persistence::normalize_path_separators);

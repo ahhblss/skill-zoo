@@ -1,0 +1,32 @@
+{
+  "entries": {
+    "repo:owner/repo:demo": {
+      "starred": true,
+      "isMine": false
+    },
+    "ssot:demo": {
+      "starred": false,
+      "isMine": true
+    },
+    "repo:owner/repo:category/nested": {
+      "starred": false,
+      "isMine": true
+    },
+    "repo:owner/repo:foo:bar": {
+      "starred": true,
+      "isMine": true
+    },
+    "ssot:kept": {
+      "starred": true,
+      "isMine": false
+    },
+    "agent:codex:/Users/example/.codex/skills/local-skill": {
+      "starred": true,
+      "isMine": true
+    },
+    "external:demo-a1b2c3d4": {
+      "starred": false,
+      "isMine": true
+    }
+  }
+}

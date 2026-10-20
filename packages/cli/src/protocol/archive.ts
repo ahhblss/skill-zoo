@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { agentLinkName, getAgentSkillsDir, getPaths } from "./paths.js";
 import {
   assertWritableSchema,
+  canonicalizeLegacySkillId,
   readArchiveManifest,
   readExternalImports,
   readLock,
@@ -331,13 +332,17 @@ async function restoreOne(home: string | undefined, archiveId: string): Promise<
     }
 
     const metadata = await readMetadata(home);
+    // Manifest IDs are historical records; map a legacy provenance-derived
+    // ID to the canonical installation identity before touching metadata.
+    const metadataKey = canonicalizeLegacySkillId(archived.originalSkillId) ?? archived.originalSkillId;
     if (archived.starred || archived.isMine) {
-      metadata.entries[archived.originalSkillId] = {
-        starred: archived.starred,
-        isMine: archived.isMine,
+      const existing = metadata.entries[metadataKey];
+      metadata.entries[metadataKey] = {
+        starred: (existing?.starred ?? false) || archived.starred,
+        isMine: (existing?.isMine ?? false) || archived.isMine,
       };
     } else {
-      delete metadata.entries[archived.originalSkillId];
+      delete metadata.entries[metadataKey];
     }
     await writeMetadata(home, metadata);
 

@@ -63,6 +63,48 @@ fn test_desktop_applies_defaults_for_minimal_protocol_fixtures() {
     assert!(imports.imports.is_empty());
 }
 
+#[test]
+fn test_desktop_migrates_legacy_metadata_fixture_keys() {
+    let source = fixture_path("metadata-legacy-repo-keys.json");
+    let original = fs::read_to_string(&source).expect("read metadata fixture");
+    let input: serde_json::Value = serde_json::from_str(&original).expect("parse fixture");
+    assert!(input["entries"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .any(|key| key.starts_with("repo:")));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("metadata.json");
+    fs::copy(&source, &path).expect("copy metadata fixture");
+    let store = skill_zoo_lib::persistence::metadata::MetadataStore::load_from(&path)
+        .expect("load metadata fixture");
+
+    // Legacy repo keys merge (OR) into canonical ssot keys.
+    assert_eq!(store.get("ssot:demo").starred, true);
+    assert_eq!(store.get("ssot:demo").is_mine, true);
+    assert_eq!(store.get("ssot:category/nested").is_mine, true);
+    assert_eq!(store.get("ssot:category/nested").starred, false);
+    assert_eq!(store.get("ssot:kept").starred, true);
+    assert_eq!(
+        store
+            .get("agent:codex:/Users/example/.codex/skills/local-skill")
+            .is_mine,
+        true
+    );
+    assert_eq!(store.get("external:demo-a1b2c3d4").is_mine, true);
+    assert!(store.get("ssot:foo:bar").starred);
+    assert!(store.get("ssot:foo:bar").is_mine);
+    assert!(!store.entries.keys().any(|key| key.starts_with("repo:")));
+    let persisted: skill_zoo_lib::persistence::metadata::MetadataStore =
+        serde_json::from_str(&fs::read_to_string(&path).expect("read migrated metadata"))
+            .expect("parse migrated metadata");
+    assert_eq!(persisted.entries, store.entries);
+    assert_eq!(
+        fs::read_to_string(source).expect("reread fixture"),
+        original
+    );
+}
+
 fn read_fixture_json<T: serde::de::DeserializeOwned>(name: &str) -> T {
     let content = fs::read_to_string(fixture_path(name)).expect("read fixture");
     serde_json::from_str(&content).expect("parse fixture")

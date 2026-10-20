@@ -198,7 +198,7 @@ async function scanDirRecursive(
       const isSsot = await pathsEqual(getPaths(home).agentsSkillsDir, scanRoot);
       const origin: SkillOrigin = isSsot ? "ssot" : "agent";
       const agentId = isSsot ? undefined : detectAgentForPath(home, scanRoot);
-      const id = makeSkillId(origin, relativeDir, repoOwner, repoName, agentId);
+      const id = makeSkillId(origin, relativeDir, agentId);
 
       if (seenIds.has(id)) {
         continue;
@@ -236,14 +236,11 @@ async function scanDirRecursive(
 export function makeSkillId(
   origin: SkillOrigin,
   directory: string,
-  repoOwner?: string | null,
-  repoName?: string | null,
   agentId?: string,
 ): string {
   if (origin === "ssot") {
-    if (repoOwner && repoName) {
-      return `repo:${repoOwner}/${repoName}:${directory}`;
-    }
+    // Identity is anchored to the installation directory; provenance must
+    // not leak into the ID, or metadata detaches when the source drifts.
     return `ssot:${directory}`;
   }
 

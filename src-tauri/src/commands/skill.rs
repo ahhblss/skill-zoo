@@ -1981,16 +1981,23 @@ pub(crate) fn restore_archived_skill_inner(
             .metadata
             .write()
             .map_err(|e| rollback(format!("Metadata lock: {e}"), &restored_agents))?;
+        // Manifest IDs are historical records; map a legacy provenance-derived
+        // ID to the canonical installation identity before touching metadata.
+        let metadata_key = crate::persistence::metadata::canonicalize_legacy_skill_id(
+            &archived_skill.original_skill_id,
+        )
+        .unwrap_or_else(|| archived_skill.original_skill_id.clone());
         if archived_skill.starred || archived_skill.is_mine {
-            metadata.entries.insert(
-                archived_skill.original_skill_id.clone(),
+            let entry = metadata.entries.entry(metadata_key).or_insert(
                 crate::persistence::metadata::SkillMetadata {
-                    starred: archived_skill.starred,
-                    is_mine: archived_skill.is_mine,
+                    starred: false,
+                    is_mine: false,
                 },
             );
+            entry.starred = entry.starred || archived_skill.starred;
+            entry.is_mine = entry.is_mine || archived_skill.is_mine;
         } else {
-            metadata.remove(&archived_skill.original_skill_id);
+            metadata.remove(&metadata_key);
         }
         if let Err(e) = metadata.save() {
             // Drop the write guard before rolling back: rollback re-acquires
@@ -3825,6 +3832,79 @@ mod tests {
             updated_at: None,
             commit_sha: Some(commit_sha.to_string()),
         }
+    }
+
+    #[test]
+    fn restore_maps_legacy_skill_id_to_canonical_metadata_key() {
+        use crate::persistence::{MetadataStore, Settings};
+        use std::collections::{BTreeMap, HashMap};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let home = dir.path();
+        crate::config::with_test_home(home, || {
+            // Archived skill files under the archive skills dir.
+            let archive_id = "demo-abc123";
+            let archive_skill_dir = ArchiveManifest::archive_skill_dir(archive_id);
+            std::fs::create_dir_all(&archive_skill_dir).expect("create archive dir");
+            std::fs::write(archive_skill_dir.join("SKILL.md"), "# Demo").expect("write skill");
+
+            // Manifest entry keeps the historical provenance-derived ID and
+            // the user flags snapshotted at archive time.
+            let archived_skill = ArchivedSkill {
+                id: archive_id.to_string(),
+                archive_id: archive_id.to_string(),
+                original_skill_id: "repo:owner/repo:demo".to_string(),
+                name: "demo".to_string(),
+                yaml_name: None,
+                description: None,
+                directory: "demo".to_string(),
+                repo_owner: Some("owner".to_string()),
+                repo_name: Some("repo".to_string()),
+                source_url: Some("https://github.com/owner/repo".to_string()),
+                apps: HashMap::new(),
+                origin: "ssot".to_string(),
+                home_path: None,
+                content_hash: None,
+                home_agent: None,
+                starred: true,
+                is_mine: false,
+                installed_at: 100,
+                updated_at: 200,
+                archived_at: 300,
+                lock_key: Some("demo".to_string()),
+                lock_entry: Some(test_lock_entry("owner/repo", "abc123")),
+                archived_by_version: Some("test".to_string()),
+                reason: None,
+            };
+            let manifest = ArchiveManifest {
+                version: SUPPORTED_ARCHIVE_VERSION,
+                skills: BTreeMap::from([(archive_id.to_string(), archived_skill)]),
+            };
+            manifest.save().expect("save manifest");
+
+            let state = AppState::new(
+                SkillCache::empty(),
+                MetadataStore {
+                    entries: HashMap::new(),
+                },
+                Settings {
+                    values: HashMap::new(),
+                },
+            );
+
+            let restored = restore_archived_skill_inner(&state, archive_id.to_string())
+                .expect("restore archived skill");
+            // The restored skill scans under the canonical identity.
+            assert_eq!(restored, "ssot:demo");
+
+            // The historical legacy ID must land on the canonical key.
+            let metadata = state.metadata.read().expect("metadata lock");
+            assert!(
+                metadata.get("ssot:demo").starred,
+                "restored star must be readable under the canonical key without a restart"
+            );
+            assert!(!metadata.entries.contains_key("repo:owner/repo:demo"));
+        });
     }
 
     #[test]

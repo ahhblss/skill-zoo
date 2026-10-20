@@ -9,6 +9,7 @@ import {
   readExternalImports,
   readCache,
   readLock,
+  readMetadata,
 } from "../src/protocol/store.js";
 import { makeTempHome } from "./helpers.js";
 
@@ -94,6 +95,36 @@ describe("desktop local protocol fixtures", () => {
 
     expect(cache.skills).toHaveLength(1);
     expect(cache.skills[0]?.apps).toBeUndefined();
+  });
+
+  it("migrates legacy metadata keys to the canonical identity on read", async () => {
+    const home = await makeTempHome();
+    const paths = getPaths(home);
+    await copyFixture("metadata-legacy-repo-keys.json", paths.metadataFile);
+
+    const original = await fs.readFile(paths.metadataFile, "utf8");
+    expect(Object.keys(JSON.parse(original).entries).some((key) => key.startsWith("repo:"))).toBe(
+      true,
+    );
+    const metadata = await readMetadata(home);
+
+    // Legacy repo keys merge (OR) into canonical ssot keys.
+    expect(metadata.entries["ssot:demo"]).toEqual({ starred: true, isMine: true });
+    expect(metadata.entries["ssot:category/nested"]).toEqual({ starred: false, isMine: true });
+    expect(metadata.entries["ssot:kept"]).toEqual({ starred: true, isMine: false });
+    expect(metadata.entries["agent:codex:/Users/example/.codex/skills/local-skill"]).toEqual({
+      starred: true,
+      isMine: true,
+    });
+    expect(metadata.entries["external:demo-a1b2c3d4"]).toEqual({ starred: false, isMine: true });
+    expect(Object.keys(metadata.entries).some((key) => key.startsWith("repo:"))).toBe(false);
+
+    expect(metadata.entries["ssot:foo:bar"]).toEqual({ starred: true, isMine: true });
+    expect(await fs.readFile(fixturePath("metadata-legacy-repo-keys.json"), "utf8")).toBe(original);
+
+    // The migration converges on disk.
+    const persisted = JSON.parse(await fs.readFile(paths.metadataFile, "utf8"));
+    expect(persisted.entries).toEqual(metadata.entries);
   });
 
   it("refuses writes for future desktop protocol versions", async () => {

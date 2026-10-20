@@ -164,7 +164,7 @@ async function createInstalledSkillFixture() {
   const paths = getPaths(home);
   const skillDir = path.join(paths.agentsSkillsDir, "code-audit");
   const linkPath = path.join(home, ".codex", "skills", "code-audit");
-  const skillId = "repo:owner/repo:code-audit";
+  const skillId = "ssot:code-audit";
 
   await writeSkill(skillDir, "name: Code Audit\ndescription: Security checks");
   await writeJson(paths.agentLockFile, {

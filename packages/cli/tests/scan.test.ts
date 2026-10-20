@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getPaths } from "../src/protocol/paths.js";
 import { rebuildCache, scanInstalledSkills } from "../src/protocol/scan.js";
 import { readCache } from "../src/protocol/store.js";
@@ -8,6 +8,68 @@ import { normalizePath } from "../src/lib/io.js";
 import { createDirLink, makeTempHome, writeJson, writeSkill } from "./helpers.js";
 
 describe("scanInstalledSkills", () => {
+  it.skipIf(process.platform === "win32")(
+    "preserves metadata for directories containing colons",
+    async () => {
+      const home = await makeTempHome();
+      const paths = getPaths(home);
+      await writeSkill(path.join(paths.agentsSkillsDir, "foo:bar"));
+      await writeJson(paths.metadataFile, {
+        entries: { "repo:owner/repo:foo:bar": { starred: true, isMine: true } },
+      });
+
+      expect(await scanInstalledSkills(home)).toMatchObject([
+        { id: "ssot:foo:bar", starred: true, isMine: true },
+      ]);
+      const persisted = JSON.parse(await fs.readFile(paths.metadataFile, "utf8"));
+      expect(persisted.entries).toEqual({ "ssot:foo:bar": { starred: true, isMine: true } });
+    },
+  );
+
+  it("returns migrated metadata when migration persistence fails", async () => {
+    const home = await makeTempHome();
+    const paths = getPaths(home);
+    await writeSkill(path.join(paths.agentsSkillsDir, "demo"));
+    const original = { entries: { "repo:owner/repo:demo": { starred: true, isMine: true } } };
+    await writeJson(paths.metadataFile, original);
+    const rename = vi
+      .spyOn(fs, "rename")
+      .mockRejectedValueOnce(Object.assign(new Error("permission denied"), { code: "EACCES" }));
+    const warning = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await scanInstalledSkills(home)).toMatchObject([
+        { id: "ssot:demo", starred: true, isMine: true },
+      ]);
+      expect(warning).toHaveBeenCalled();
+      expect(JSON.parse(await fs.readFile(paths.metadataFile, "utf8"))).toEqual(original);
+    } finally {
+      rename.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  it("keeps user metadata alive when provenance drifts", async () => {
+    const home = await makeTempHome();
+    const paths = getPaths(home);
+    const skillDir = path.join(paths.agentsSkillsDir, "code-audit");
+    await writeSkill(skillDir, "name: Code Audit\ndescription: Security checks");
+    // Metadata recorded while provenance was known, then the lock disappears.
+    await writeJson(paths.metadataFile, {
+      entries: {
+        "repo:owner/repo:code-audit": { starred: true, isMine: false },
+      },
+    });
+
+    const skills = await scanInstalledSkills(home);
+
+    expect(skills).toHaveLength(1);
+    expect(skills[0]?.id).toBe("ssot:code-audit");
+    expect(skills[0]?.starred).toBe(true);
+    // The legacy key is migrated on disk, not just in memory.
+    const persisted = JSON.parse(await fs.readFile(paths.metadataFile, "utf8"));
+    expect(persisted.entries["ssot:code-audit"]).toEqual({ starred: true, isMine: false });
+    expect(persisted.entries["repo:owner/repo:code-audit"]).toBeUndefined();
+  });
   it("scans SSOT skills, lock metadata, frontmatter, hashes, and agent links", async () => {
     const home = await makeTempHome();
     const paths = getPaths(home);
@@ -33,7 +95,7 @@ describe("scanInstalledSkills", () => {
 
     expect(skills).toHaveLength(1);
     expect(skills[0]).toMatchObject({
-      id: "repo:owner/repo:code-audit",
+      id: "ssot:code-audit",
       name: "code-audit",
       yamlName: "Code Audit",
       description: "Security checks",

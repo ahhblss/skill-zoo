@@ -369,3 +369,35 @@ fn test_scan_skill_root_recomputes_hash_after_file_deletion() {
 
     assert_ne!(before, after);
 }
+
+#[test]
+fn metadata_survives_lost_provenance() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path();
+
+    // SSOT skill on disk; no lock file, no lock entry — provenance is gone.
+    let skill_dir = home.join(".agents").join("skills").join("demo");
+    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+    std::fs::write(skill_dir.join("SKILL.md"), "# Demo").expect("write skill");
+
+    // User metadata recorded while provenance was still known.
+    let app_dir = home.join(".skill-zoo");
+    std::fs::create_dir_all(&app_dir).expect("create app dir");
+    std::fs::write(
+        app_dir.join("metadata.json"),
+        r#"{"entries": {"repo:owner/repo:demo": {"starred": true, "isMine": false}}}"#,
+    )
+    .expect("write metadata");
+
+    skill_zoo_lib::config::with_test_home(home, || {
+        let entry = SkillService::scan_single_skill("demo").expect("scan single skill");
+        assert_eq!(entry.id, "ssot:demo");
+
+        let metadata = MetadataStore::load().expect("load metadata");
+        let meta = metadata.get(&entry.id);
+        assert!(
+            meta.starred,
+            "star must survive provenance loss (lock gone)"
+        );
+    });
+}

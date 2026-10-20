@@ -74,11 +74,58 @@ export async function writeExternalImports(
 
 export async function readMetadata(home?: string): Promise<MetadataStore> {
   const metadata = await readJson<MetadataStore>(getPaths(home).metadataFile, DEFAULT_METADATA);
-  return {
+  const store: MetadataStore = {
     ...DEFAULT_METADATA,
     ...metadata,
     entries: metadata.entries ?? {},
   };
+  // Rekey legacy provenance-derived IDs to the canonical installation
+  // directory identity (mirrors the desktop's MetadataStore migration).
+  const legacyKeys = Object.keys(store.entries).filter(
+    (key) => canonicalizeLegacySkillId(key) !== null,
+  );
+  if (legacyKeys.length === 0) {
+    return store;
+  }
+  for (const legacyKey of legacyKeys) {
+    const entry = store.entries[legacyKey];
+    if (!entry) {
+      continue;
+    }
+    const canonical = canonicalizeLegacySkillId(legacyKey) as string;
+    delete store.entries[legacyKey];
+    const existing = store.entries[canonical];
+    store.entries[canonical] = existing
+      ? {
+          starred: existing.starred || entry.starred,
+          isMine: existing.isMine || entry.isMine,
+        }
+      : entry;
+  }
+  try {
+    await writeMetadata(home, store);
+  } catch (error) {
+    console.error(`metadata.json: legacy key migration save failed: ${error}`);
+  }
+  return store;
+}
+
+/**
+ * Map a legacy provenance-derived skill ID to the canonical installation
+ * directory identity. `repo:{owner}/{repo}:{dir}` → `ssot:{dir}`; owner/repo
+ * cannot contain `:`, so the first `:` after the prefix preserves the full directory.
+ * Any other ID form is already canonical and returns null.
+ */
+export function canonicalizeLegacySkillId(skillId: string): string | null {
+  if (!skillId.startsWith("repo:")) {
+    return null;
+  }
+  const rest = skillId.slice("repo:".length);
+  const splitAt = rest.indexOf(":");
+  if (splitAt < 0) {
+    return null;
+  }
+  return `ssot:${rest.slice(splitAt + 1)}`;
 }
 
 export async function writeMetadata(home: string | undefined, metadata: MetadataStore): Promise<void> {
