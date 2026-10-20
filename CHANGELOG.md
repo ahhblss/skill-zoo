@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.56] — 2026-10-21
 
 ### Changed
 - User metadata is keyed by installation directory instead of provenance, so stars and "my skills" survive a skill's source changing; legacy `repo:` keys are migrated on first load.
